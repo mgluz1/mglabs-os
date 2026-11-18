@@ -17,6 +17,9 @@ on:
 
 concurrency: overture-ingest
 
+permissions:
+  contents: write # publica o arquivo na branch data-overture
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -34,11 +37,17 @@ jobs:
         run: python scripts/overture_ingest.py profile
       - name: Exportar lugares
         run: python scripts/overture_ingest.py export
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ov_places
-          path: ov_places.jsonl
-          retention-days: 7
+      - name: Publicar na branch data-overture (substitui a anterior, sem histórico)
+        run: |
+          gzip -9 -k ov_places.jsonl
+          mkdir -p /tmp/data && cp ov_places.jsonl.gz /tmp/data/
+          cd /tmp/data
+          git init -q -b data-overture
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "Overture ${OVERTURE_RELEASE:-padrão} · $(zcat ov_places.jsonl.gz | wc -l) lugares · gerado em $(date -u +%FT%TZ)" > README.md
+          git add . && git commit -q -m "dados Overture para o radar"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data-overture
       - name: Gravar no Neon
         if: env.DATABASE_URL != ''
         run: python scripts/overture_ingest.py load
