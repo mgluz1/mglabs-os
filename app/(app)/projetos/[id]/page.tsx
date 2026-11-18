@@ -12,8 +12,7 @@ export default function ProjectPage({ params }: PageProps<"/projetos/[id]">) {
       {async (ctx) => {
         const { id } = await params;
         if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundError("Projeto");
-        const [data, tasks, open, done, receivables] = await Promise.all([getProject(ctx, id), listTasks(ctx, { projectId: id, view: "abertas" }), Promise.resolve(null), listTasks(ctx, { projectId: id, view: "concluidas" }), canModule(ctx, "financeiro") ? listReceivables(ctx, { projectId: id }) : Promise.resolve(null)]);
-        void open;
+        const [data, tasks, done, receivables] = await Promise.all([getProject(ctx, id), listTasks(ctx, { projectId: id, view: "abertas" }), listTasks(ctx, { projectId: id, view: "concluidas" }), canModule(ctx, "financeiro") ? listReceivables(ctx, { projectId: id }) : Promise.resolve(null)]);
         return (
           <>
             <PageHeader back={{ href: "/projetos", label: "Projetos" }} title={data.project.name} />

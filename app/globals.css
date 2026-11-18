@@ -101,7 +101,8 @@ h3,
   scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
 }
 
-/* ---------- Primitivos de UI ---------- */
+/* ---------- Primitivos de UI (em @layer components: utilitários do Tailwind sempre vencem) ---------- */
+@layer components {
 .btn {
   display: inline-flex;
   align-items: center;
@@ -196,6 +197,8 @@ textarea.input {
   }
 }
 
+}
+
 .slide-in {
   animation: slide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -263,5 +266,24 @@ textarea.input {
   .radar-ping,
   .radar-sweep {
     animation: none !important;
+  }
+}
+
+/* Impressão (pré-visualização da proposta): esconde a navegação e libera a rolagem */
+@media print {
+  [data-app-chrome] {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+  }
+  .h-dvh {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  main {
+    overflow: visible !important;
   }
 }

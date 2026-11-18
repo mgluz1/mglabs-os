@@ -1,70 +1,82 @@
-# radarMGLABS
+# MGLABS OS (radarMGLABS)
 
-Radar de prospecção da MG Labs: negócios no mapa, contatos comerciais, Lead Score, mensagem com IA e mini-CRM. Especificação em [`docs/PROMPT-v0.md`](docs/PROMPT-v0.md).
+Centro de operações privado do estúdio **mglabs** (Goiânia/GO): prospecção → CRM → mensagens → propostas → clientes → projetos → financeiro. O **Radar** (negócios no mapa, contatos comerciais e Lead Score) é o mecanismo de descoberta; o CRM funciona sem ele.
+
+- Especificação do produto: [`docs/CRM-MGLABS-OS-PRD.md`](docs/CRM-MGLABS-OS-PRD.md) (PR #5) · design system: [`docs/DESIGN-SYSTEM-MGLABS-OS.md`](docs/DESIGN-SYSTEM-MGLABS-OS.md)
+- **Estado real da implementação (o que existe, o que falta, decisões): [`docs/STATUS-MGLABS-OS.md`](docs/STATUS-MGLABS-OS.md)**
+- Especificação histórica do Radar v0: [`docs/PROMPT-v0.md`](docs/PROMPT-v0.md)
+
+## Módulos
+
+| Área | Telas |
+| --- | --- |
+| Visão geral | `/dashboard` — números reais do banco, funil, follow-ups, atividades |
+| Comercial | `/radar` · `/crm` (quadro + tabela, ficha completa) · `/empresas` (+ ficha 360°) · `/mensagens` (Estúdio) · `/tarefas` · `/propostas` (+ catálogo) |
+| Operação | `/clientes` · `/projetos` (briefing, materiais, direção criativa, desenvolvimento, entrega) · `/conhecimento` |
+| Gestão | `/financeiro` · `/relatorios` · `/configuracoes` · `/status` |
+
+Atalhos: `Ctrl/Cmd+K` busca global · `Ctrl/Cmd+B` recolhe o menu · `g` + letra navega (ex.: `g c` = CRM, `g t` = tarefas).
 
 ## Stack
 
-- Next.js 16 (App Router, Cache Components) + TypeScript + Tailwind
-- Neon (projeto `mglabs`, branch `production`, região São Paulo)
-  - Postgres 18 + PostGIS + pg_trgm, via `pg` + Drizzle
-  - Neon Auth gerenciado (Better Auth), via `@neon/auth`
+Next.js 16 (App Router, Cache Components) · TypeScript · Tailwind 4 · Neon (Postgres + PostGIS + pg_trgm) via `pg` + Drizzle · Neon Auth · MapLibre + OpenFreeMap + Overture Maps · Gemini (opcional) · MCP (Claude Code). Fontes Inter e Space Grotesk self-hosted (`@fontsource-variable`). Marca oficial em `public/brand` (copiada de `mgluz1/mglabs`).
 
 ## Rodar local
 
 ```bash
 npm install
-cp .env.example .env.local   # preencha com os valores do Neon (ver abaixo)
+cp .env.example .env.local   # preencha (ver abaixo)
+npm run db:migrate           # aplica as migrations (inclui a 0005 do MGLABS OS)
 npm run dev
 ```
 
-Abra http://localhost:3000, crie sua conta em `/auth/sign-up` e entre.
+Abra http://localhost:3000 e entre com a sua conta (`/auth/sign-in`).
 
-### Variáveis do Neon
+### Variáveis
 
-Com a CLI (`npm i -g neon`, depois `neon login`):
+Veja `.env.example`. As do Neon vêm do Console (**Connect** e **Auth**) ou da CLI (`neon init` + `neon deploy`). `NEON_AUTH_COOKIE_SECRET`: `openssl rand -base64 32`. `CRON_SECRET`: `openssl rand -hex 24`.
+
+**Acesso e privacidade.** O app é privado: cada dado pertence a um *espaço de trabalho* e só quem é membro enxerga. No primeiro acesso após a migration, o primeiro usuário vira proprietário — defina `OWNER_EMAIL` para travar isso no seu e-mail e **desligue o cadastro público no Neon Auth**. Qualquer outra conta criada fica sem acesso a nenhum dado.
+
+## Migração do mini-CRM antigo
+
+A migration `0005_mglabs_os_crm.sql` é **aditiva**: cria as tabelas novas (`crm_*`, `workspaces`, …) e copia `leads` → empresas + oportunidades e `activities` → histórico, mapeando as etapas (abordado → Primeiro contato, respondeu → Conversa, fechado → Fechado ganho…). Guarda `legacy_lead_id`/`legacy_activity_id`, é idempotente e **não altera nem apaga** `leads`/`activities`. Antes de aplicar em produção, faça um branch/snapshot do Neon e compare as contagens (`select count(*) from leads` = `select count(*) from crm_deals where legacy_lead_id is not null`).
+
+## IA opcional (Gemini)
+
+Defina `GEMINI_API_KEY` (só servidor). Recursos: variações de mensagem, resumo da oportunidade, próxima ação e sugestão de tarefas — sempre sugestões editáveis. Sem a chave, nada quebra. Limite diário (`GEMINI_DAILY_LIMIT`), erros 429/503 viram mensagem clara, logs sem conteúdo. **Privacidade:** o plano gratuito do Gemini pode usar os dados enviados para melhorar produtos; o app envia o mínimo (sem nomes de contatos, telefones, e-mails, links, valores ou histórico completo) e exige autorização explícita. Confirme o modelo (`GEMINI_MODEL`) e as cotas da sua conta em aistudio.google.com/rate-limit.
+
+## Claude Code via MCP
+
+Servidor MCP remoto em `/api/mcp` (Streamable HTTP). **Configurações → Claude Code (MCP)** gera um token do próprio MGLABS OS (somente leitura, ou leitura + rascunhos/tarefas), mostrado uma vez e guardado só como hash. Conecte o Claude Code oficial:
 
 ```bash
-neon init -y --org-id org-royal-fog-15690863 --project-id summer-wildflower-93011864 --branch production --services postgres,auth
-neon deploy        # aplica neon.ts e grava DATABASE_URL, NEON_AUTH_* no .env.local
+claude mcp add --transport http mglabs https://SEU-DOMINIO/api/mcp --header "Authorization: Bearer mglabs_..."
 ```
 
-Sem a CLI: Console do Neon → projeto `mglabs` → **Connect** (connection string pooled e direta) e **Auth** (Auth URL). Gere `NEON_AUTH_COOKIE_SECRET` com `openssl rand -base64 32`.
+Ferramentas: `search`, `list_leads`, `get_lead`, `list_companies`, `get_company`, `get_pipeline`, `list_due_tasks`, `list_projects`, `get_project_briefing` (leitura) e `create_message_draft`, `create_task`, `append_activity`, `update_deal_stage` (escrita, só com token de escrita). As ferramentas chamam os **mesmos serviços** da interface (autorização por espaço, validação, auditoria e bloqueio de quem pediu para não ser contatado). Nada é enviado: mensagens só viram rascunho; fechar ganho/perdido e o financeiro ficam na interface. O app não guarda credenciais da assinatura Claude.
 
-## Mapa e dados dos negócios (grátis, sem Google)
+## Mapa e dados dos negócios (grátis)
 
-- **Mapa**: OpenStreetMap via [OpenFreeMap](https://openfreemap.org) (estilo escuro, sem chave), desenhado com MapLibre. Para trocar o estilo, defina `NEXT_PUBLIC_MAP_STYLE`.
-- **Negócios**: [Overture Maps](https://overturemaps.org) (dados abertos, licença CDLA Permissive 2.0), recortados para Goiânia e Aparecida pelo `scripts/overture_ingest.py`.
-- **Fluxo da base**: o GitHub Action `overture-ingest` roda todo mês (dia 25), baixa o release mais recente, filtra as categorias e publica `ov_places.jsonl.gz` na branch `data-overture`. No dia 26 o cron da Vercel `/api/cron/overture` importa esse arquivo para a tabela `ov_places`. Também dá para importar na hora em **/status → Atualizar base agora**.
-- Por isso a busca não gasta nenhuma chamada paga. As notas e avaliações do Google não aparecem; o bloco "saúde do negócio" do Lead Score usa a confiança e o número de fontes do Overture.
-- Opcional: `PAGESPEED_API_KEY` (Google PageSpeed, só mede a velocidade do site da empresa) e `OVERTURE_DATA_URL` (outra origem para o arquivo).
-
-`ANTHROPIC_API_KEY` vem do console da Anthropic. `CRON_SECRET`: `openssl rand -hex 24`.
-
-## Como usar
-
-1. **Radar**: escolha a categoria, a cidade (ou clique no mapa) e o raio. Clique em **Buscar** (grátis, a busca é feita na base aberta).
-2. Os resultados aparecem na hora; a análise dos sites roda em seguida (faixa azul "Analisando sites…"). Franquias, fechados e duplicados são descartados automaticamente.
-3. Clique num negócio: painel com a nota, o porquê de cada ponto, os contatos e a origem de cada um.
-4. **Gerar com IA** → revise o texto → **Abrir no WhatsApp** (abre o seu WhatsApp com a mensagem pronta; nada é enviado sozinho) → confirme **Mandou?** para registrar no CRM com follow-up em 3 dias.
-5. **Não contatar mais** tira o negócio de todas as buscas futuras.
-6. **CRM**: arraste os cards entre as etapas, edite valor e próximo passo, veja os follow-ups do dia e exporte CSV.
-
-Ajustes rápidos: pesos do Lead Score em `lib/config/score.ts`, franquias em `lib/config/franquias.ts`, categorias e termos do Overture em `lib/config/categories.ts`.
+- **Mapa**: OpenStreetMap via [OpenFreeMap](https://openfreemap.org) (estilos escuro/claro, sem chave), desenhado com MapLibre.
+- **Negócios**: [Overture Maps](https://overturemaps.org) (CDLA Permissive 2.0), recortados para Goiânia e Aparecida por `scripts/overture_ingest.py`. O GitHub Action `overture-ingest` roda todo dia 25 e publica na branch `data-overture`; o cron `/api/cron/overture` importa no dia 26 (ou em **/status → Atualizar base agora**).
+- Dados só do Overture e da página inicial do site oficial da empresa. Nada de scraping do Google Maps/Instagram. O WhatsApp nunca é automatizado: o app só abre um link `wa.me` com o texto pronto.
 
 ## Banco
 
-- Esquema: `db/schema.ts`. Migrations: `db/migrations` (já aplicadas no `production`).
-- Nova migration: `npm run db:generate` → revise o SQL → `npm run db:migrate` (usa `DATABASE_URL_UNPOOLED`).
+- Esquema: `db/schema.ts`. Migrations: `db/migrations`. Nova migration: `npm run db:generate` → revise o SQL (remova aspas dos tipos PostGIS) → `npm run db:migrate` (usa `DATABASE_URL_UNPOOLED`).
+- Dinheiro sempre em centavos (`bigint`); datas em `timestamptz` (UTC), exibidas em America/Sao_Paulo.
 
-## Verificar
+## Testes
 
-- Sem login, qualquer página redireciona para `/auth/sign-in`.
-- `/status` mostra a versão do Postgres, PostGIS, pg_trgm e as tabelas do radar.
-- `npm test` roda os testes das regras (telefone, grade de busca, análise de site, Lead Score).
-- `GET /api/health` (logado) → JSON com usuário e estado do banco.
+```bash
+npm test                      # regras puras (dinheiro, mensagens, sanitização, funil, Radar)
+npm run lint && npx tsc --noEmit
+TEST_DATABASE_URL=postgres://... npx vitest run tests/integration-crm.test.ts   # integração com Postgres real
+```
+
+O teste de integração cobre: cadastro manual → funil → tarefa → proposta versionada → projeto idempotente → pagamento; isolamento entre espaços de trabalho; opt-out; e o servidor MCP (token, leitura × escrita, revogação). Precisa de um Postgres com as migrations aplicadas (em Postgres sem PostGIS, use um banco só de testes).
 
 ## Publicar
 
-Na hospedagem (Vercel Pro, Netlify…), cadastre as mesmas variáveis do `.env.local` e adicione o domínio final como **trusted domain** no Neon Auth (`neon neon-auth domain add https://seu-dominio`).
-
-O `vercel.json` fixa a região `gru1` (São Paulo, perto do banco) e agenda os crons `/api/cron/purge` (diário, limpa cache antigo) e `/api/cron/overture` (mensal, atualiza a base aberta).
+Vercel (região `gru1` em `vercel.json`): cadastre as variáveis, adicione o domínio como **trusted domain** no Neon Auth, aplique a migration e confira `/status`. Crons: `/api/cron/purge` (diário) e `/api/cron/overture` (mensal).

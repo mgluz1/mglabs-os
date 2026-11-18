@@ -104,7 +104,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 }
               }}
               placeholder="Buscar empresas, contatos, oportunidades, projetos… ou ir para uma tela"
-              className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-fg/35"
+              className="h-12 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none placeholder:text-fg/35"
               aria-label="Buscar"
             />
             {loading && <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-transparent" aria-hidden />}

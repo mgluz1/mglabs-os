@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileText, FolderKanban, MessageSquareText, Plus } from "lucide-react";
+import { Check, FileText, FolderKanban, Loader2, MessageSquareText, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -8,6 +8,7 @@ import { StageBadge, ScorePill } from "@/components/crm/common";
 import { Badge, priorityTone } from "@/components/ui/kit";
 import { Dialog, SlideOver, useRun, useToast } from "@/components/ui/overlays";
 import { MoneyInput } from "@/components/ui/money-input";
+import { nextActionAction, suggestTasksAction, summarizeDealAction } from "@/lib/actions/ai";
 import { addNoteAction, convertDealAction, dealDetailAction, moveDealAction, optOutCompanyAction, updateDealAction } from "@/lib/actions/crm";
 import { completeTaskAction, createTaskAction } from "@/lib/actions/tasks";
 import { LOST_REASONS, SERVICE_TYPES, labelOf, PRIORITIES, PROPOSAL_STATUS, sourceLabel } from "@/lib/config/crm";
@@ -20,7 +21,7 @@ type Detail = Extract<Awaited<ReturnType<typeof dealDetailAction>>, { ok: true }
 type Tab = "geral" | "historico" | "tarefas" | "propostas";
 const KIND_LABEL: Record<string, string> = { nota: "Nota", etapa: "Etapa", mensagem_enviada: "Mensagem registrada", ligacao: "Ligação", resposta: "Resposta do cliente", reuniao: "Reunião", tarefa: "Tarefa", proposta: "Proposta", projeto: "Projeto", pagamento: "Financeiro", optout: "Não contatar", sistema: "Sistema" };
 
-export function DealDrawer({ dealId, stages, onClose, onChanged }: { dealId: string | null; stages: StageOption[]; onClose: () => void; onChanged: () => void }) {
+export function DealDrawer({ dealId, stages, onClose, onChanged, aiEnabled }: { dealId: string | null; stages: StageOption[]; onClose: () => void; onChanged: () => void; aiEnabled: boolean }) {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("geral");
@@ -72,7 +73,7 @@ export function DealDrawer({ dealId, stages, onClose, onChanged }: { dealId: str
             ))}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-5">
-            {tab === "geral" && <General data={data} onChanged={changed} />}
+            {tab === "geral" && <General data={data} onChanged={changed} aiEnabled={aiEnabled} />}
             {tab === "historico" && <History data={data} onChanged={changed} />}
             {tab === "tarefas" && <Tasks data={data} onChanged={changed} />}
             {tab === "propostas" && <Proposals data={data} />}
@@ -176,7 +177,7 @@ function ConvertDialog({ open, onClose, data, onDone }: { open: boolean; onClose
   );
 }
 
-function General({ data, onChanged }: { data: Detail; onChanged: () => void }) {
+function General({ data, onChanged, aiEnabled }: { data: Detail; onChanged: () => void; aiEnabled: boolean }) {
   const { run, pending } = useRun();
   const c = data.card;
   const [f, setF] = useState({
@@ -257,6 +258,8 @@ function General({ data, onChanged }: { data: Detail; onChanged: () => void }) {
           <ul className="space-y-1 text-sm">{data.scoreRules.map((r, i) => <li key={i} className="flex justify-between gap-3"><span className="truncate">{r.label}</span><span className="tabular-nums text-brand">+{r.points}</span></li>)}</ul>
         </section>
       )}
+
+      <AiPanel data={data} onChanged={onChanged} aiEnabled={aiEnabled} />
 
       <section className="border-t border-line pt-4">
         <button className="text-xs text-danger hover:underline" onClick={() => setOptOpen(true)}>Registrar “não contatar mais”</button>
@@ -357,5 +360,77 @@ function Proposals({ data }: { data: Detail }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// ---------- Assistente de IA (opcional; sugestões sempre editáveis, nada é gravado sem você confirmar) ----------
+type Summary = { resumo: string; pontos_de_atencao: string[] };
+type Next = { acao: string; motivo: string; canal_sugerido: string; prazo_dias: number };
+type Sug = { titulo: string; prazo_dias: number; prioridade: "baixa" | "media" | "alta"; on: boolean };
+
+function AiPanel({ data, onChanged, aiEnabled }: { data: Detail; onChanged: () => void; aiEnabled: boolean }) {
+  const { run, pending } = useRun();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [consent, setConsent] = useState<null | (() => void)>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [next, setNext] = useState<Next | null>(null);
+  const [tasks, setTasks] = useState<Sug[] | null>(null);
+  const due = (days: number) => ymdSP(new Date(Date.now() + days * 86_400_000));
+
+  if (!aiEnabled) return <p className="text-xs text-muted">IA desligada (sem GEMINI_API_KEY): tudo continua manual.</p>;
+
+  const guard = (fn: () => void) => {
+    let ok = false;
+    try { ok = localStorage.getItem("mglabs-ai-consent") === "1"; } catch { /* pergunta sempre */ }
+    if (ok) fn(); else setConsent(() => fn);
+  };
+  const call = async <T,>(key: string, fn: () => Promise<{ ok: true; data: T } | { ok: false; error: string }>, set: (d: T) => void) => {
+    setBusy(key);
+    const r = await fn();
+    setBusy(null);
+    if (r.ok) set(r.data); else toast(r.error, "error");
+  };
+
+  return (
+    <section className="rounded-xl border border-line bg-elevated p-4">
+      <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-brand" /> Assistente de IA <span className="text-xs font-normal text-muted">opcional · você revisa tudo</span></h3>
+      <p className="mb-3 text-xs text-muted">Envia ao Gemini só um resumo anonimizado (sem nome da empresa, contatos, valores nem telefones).</p>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => guard(() => call("r", () => summarizeDealAction(data.card.id, true), setSummary))}>{busy === "r" && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Resumir</button>
+        <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => guard(() => call("a", () => nextActionAction(data.card.id, true), setNext))}>{busy === "a" && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Próxima ação</button>
+        <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => guard(() => call("t", () => suggestTasksAction(data.card.id, true), (d) => setTasks(d.tarefas.map((t) => ({ titulo: t.titulo, prazo_dias: t.prazo_dias, prioridade: t.prioridade, on: true })))))}>{busy === "t" && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Sugerir tarefas</button>
+      </div>
+
+      {summary && (
+        <div className="mt-3 space-y-2">
+          <textarea className="input" rows={4} value={summary.resumo} onChange={(e) => setSummary({ ...summary, resumo: e.target.value })} aria-label="Resumo sugerido" />
+          {summary.pontos_de_atencao.length > 0 && <ul className="list-disc pl-5 text-xs text-muted">{summary.pontos_de_atencao.map((p) => <li key={p}>{p}</li>)}</ul>}
+          <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => run(() => addNoteAction({ dealId: data.card.id, kind: "nota", content: `Resumo (sugestão de IA, revisado): ${summary.resumo}` }), { ok: "Resumo salvo como nota.", onOk: () => { setSummary(null); onChanged(); }, refresh: false })}>Salvar como nota</button>
+        </div>
+      )}
+
+      {next && (
+        <div className="mt-3 space-y-2">
+          <input className="input" value={next.acao} onChange={(e) => setNext({ ...next, acao: e.target.value })} aria-label="Ação sugerida" />
+          <p className="text-xs text-muted">{next.motivo} · canal sugerido: {next.canal_sugerido} · prazo sugerido: {next.prazo_dias} dia(s)</p>
+          <button className="btn btn-primary btn-sm" disabled={pending || !next.acao.trim()} onClick={() => run(() => createTaskAction({ title: next.acao, dealId: data.card.id, companyId: data.card.companyId, dueAt: ymdToInstantSP(due(next.prazo_dias))?.toISOString(), source: "ia" }), { ok: "Tarefa criada.", onOk: () => { setNext(null); onChanged(); }, refresh: false })}>Criar tarefa com esta ação</button>
+        </div>
+      )}
+
+      {tasks && (
+        <div className="mt-3 space-y-2">
+          {tasks.map((t, i) => (
+            <label key={i} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={t.on} onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} /><input className="input py-1" value={t.titulo} onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, titulo: e.target.value } : x)))} aria-label={`Tarefa ${i + 1}`} /><span className="shrink-0 text-xs text-muted">{t.prazo_dias}d</span></label>
+          ))}
+          <button className="btn btn-primary btn-sm" disabled={pending || !tasks.some((t) => t.on)} onClick={async () => { for (const t of tasks.filter((x) => x.on && x.titulo.trim())) await createTaskAction({ title: t.titulo, dealId: data.card.id, companyId: data.card.companyId, dueAt: ymdToInstantSP(due(t.prazo_dias))?.toISOString(), priority: t.prioridade, source: "ia" }); toast("Tarefas criadas."); setTasks(null); onChanged(); }}>Criar selecionadas</button>
+        </div>
+      )}
+
+      <Dialog open={!!consent} onClose={() => setConsent(null)} title="Usar o Gemini (plano gratuito)" footer={<><button className="btn btn-ghost" onClick={() => setConsent(null)}>Cancelar</button><button className="btn btn-primary" onClick={() => { try { localStorage.setItem("mglabs-ai-consent", "1"); } catch { /* ok */ } const f = consent; setConsent(null); f?.(); }}>Autorizar e continuar</button></>}>
+        <p className="text-sm">O app envia um resumo anonimizado: etapa, serviço, origem, dias no funil, próximo passo, tarefas e os últimos registros do histórico — com e-mails, telefones, links, @perfis e valores removidos e o nome da empresa trocado por “[empresa]”.</p>
+        <p className="mt-2 text-sm text-muted">No plano gratuito, o Google pode usar entradas e saídas para melhorar produtos e revisá-las por pessoas. Evite registrar dados pessoais nas notas.</p>
+      </Dialog>
+    </section>
   );
 }

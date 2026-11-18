@@ -9,5 +9,6 @@ export default auth.middleware({
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // ativos estáticos da marca (/brand) precisam carregar também na tela de login
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/).*)"],
 };

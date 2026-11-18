@@ -229,7 +229,7 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                     >
                       <o.icon className={`mb-2 h-5 w-5 ${on ? "text-brand-on" : "text-brand"}`} />
                       <div className="text-sm font-semibold leading-tight">{o.label}</div>
-                      <div className={`mt-0.5 text-[11px] leading-snug ${on ? "text-fg/80" : "text-fg/45"}`}>{o.hint}</div>
+                      <div className={`mt-0.5 text-[11px] leading-snug ${on ? "text-brand-on/75" : "text-fg/45"}`}>{o.hint}</div>
                     </button>
                   );
                 })}

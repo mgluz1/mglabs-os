@@ -3,13 +3,29 @@
 import { ChevronsLeft, ChevronsRight, Menu, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { Brand, BrandMark } from "@/components/brand";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { NAV, QUICK_CREATE } from "@/components/shell/nav";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { ToastProvider } from "@/components/ui/overlays";
+
+function subscribeSidebar(cb: () => void) {
+  window.addEventListener("storage", cb);
+  window.addEventListener("mglabs-sidebar", cb);
+  return () => {
+    window.removeEventListener("storage", cb);
+    window.removeEventListener("mglabs-sidebar", cb);
+  };
+}
+function readSidebar() {
+  try {
+    return localStorage.getItem("mglabs-sidebar") === "1";
+  } catch {
+    return false;
+  }
+}
 
 function isTyping(el: EventTarget | null) {
   const t = el as HTMLElement | null;
@@ -18,29 +34,20 @@ function isTyping(el: EventTarget | null) {
 
 export function AppShell({ children, user }: { children: ReactNode; user: ReactNode }) {
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  // preferência do menu recolhido: só conveniência (funciona sem armazenamento)
+  const collapsed = useSyncExternalStore(subscribeSidebar, readSidebar, () => false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const gPending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // preferência do menu recolhido (só conveniência: funciona sem armazenamento)
-  useEffect(() => {
-    try {
-      if (localStorage.getItem("mglabs-sidebar") === "1") setCollapsed(true);
-    } catch {
-      /* ignorar */
-    }
-  }, []);
   const toggle = useCallback(() => {
-    setCollapsed((c) => {
-      try {
-        localStorage.setItem("mglabs-sidebar", c ? "0" : "1");
-      } catch {
-        /* ignorar */
-      }
-      return !c;
-    });
+    try {
+      localStorage.setItem("mglabs-sidebar", readSidebar() ? "0" : "1");
+    } catch {
+      /* sem armazenamento: não persiste */
+    }
+    window.dispatchEvent(new Event("mglabs-sidebar"));
   }, []);
 
   // atalhos: Ctrl/Cmd+K busca · Ctrl/Cmd+B menu · "g" + letra navega
@@ -82,7 +89,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
       </a>
       <div className="flex h-dvh w-full overflow-hidden">
         {/* desktop */}
-        <aside className={`hidden shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200 md:flex ${collapsed ? "w-[68px]" : "w-60"}`}>
+        <aside data-app-chrome className={`hidden shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200 md:flex ${collapsed ? "w-[68px]" : "w-60"}`}>
           <div className={`flex h-14 items-center ${collapsed ? "justify-center" : "px-4"}`}>
             <Link href="/dashboard" aria-label="mglabs — início">
               <Brand compact={collapsed} />
@@ -111,7 +118,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface/80 px-3 backdrop-blur sm:px-4">
+          <header data-app-chrome className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface/80 px-3 backdrop-blur sm:px-4">
             <button onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-muted hover:bg-fg/8 md:hidden" aria-label="Abrir menu">
               <Menu className="h-5 w-5" />
             </button>

@@ -73,7 +73,7 @@ export async function dashboardData(ctx: Ctx, periodDays = 30) {
     companies: c.companies,
     projectsActive: c.projects_active,
     funnel: funnel.rows.map((f) => ({ key: f.key, label: f.label, kind: f.kind, count: f.n, valueCents: Number(f.value) })),
-    followups: followups.rows.map((f) => ({ kind: f.kind, id: f.id, title: f.title, companyName: f.company_name, dueAt: new Date(f.due_at), dealId: f.deal_id })),
+    followups: followups.rows.map((f) => ({ kind: f.kind, id: f.id, title: f.title, companyName: f.company_name, dueAt: new Date(f.due_at), dealId: f.deal_id, overdue: new Date(f.due_at).getTime() < Date.now() })),
     recent,
     finance: finance ? { ...finance, receivedPeriodCents: Number(received?.rows[0].total ?? 0) } : null,
   };

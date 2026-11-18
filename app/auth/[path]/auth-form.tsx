@@ -43,8 +43,6 @@ export function AuthForm({ path }: { path: string }) {
   const field = "input py-2.5";
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-6">
-      <div className="pointer-events-none absolute h-[640px] w-[640px] rounded-full border border-brand/10" />
-      <div className="radar-sweep pointer-events-none absolute h-[640px] w-[640px] rounded-full opacity-60" />
       <div className="relative w-full max-w-sm rounded-2xl bg-surface/90 p-7 shadow-2xl ring-1 ring-fg/10 backdrop-blur-xl">
         <div className="mb-6">
           <Brand />

@@ -19,7 +19,7 @@ import type { DealCard } from "@/lib/services/deals";
 
 export type StageOption = { key: string; label: string; kind: string; probability: number };
 
-export function CrmClient({ deals, stages, companies, services }: { deals: DealCard[]; stages: StageOption[]; companies: CompanyOption[]; services: string[] }) {
+export function CrmClient({ deals, stages, companies, services, aiEnabled = false }: { deals: DealCard[]; stages: StageOption[]; companies: CompanyOption[]; services: string[]; aiEnabled?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -111,7 +111,7 @@ export function CrmClient({ deals, stages, companies, services }: { deals: DealC
           <EmptyState icon={Kanban} title="Seu funil está vazio" description="Crie uma oportunidade manualmente ou envie empresas do Radar para o CRM. Elas aparecem aqui na etapa “Novo”." action={<><button className="btn btn-primary" onClick={() => setNewOpen(true)}>Nova oportunidade</button><a href="/radar" className="btn btn-ghost">Buscar no Radar</a></>} />
         </div>
       ) : view === "kanban" ? (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <DndContext id="crm-board" sensors={sensors} onDragEnd={onDragEnd}>
           <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:px-8">
             {stages.map((s) => (
               <Column key={s.key} stage={s} deals={filtered.filter((d) => d.stageKey === s.key)} onOpen={setDeal} now={now} />
@@ -140,7 +140,7 @@ export function CrmClient({ deals, stages, companies, services }: { deals: DealC
       )}
 
       <NewDealDialog open={newOpen} onClose={() => { setNewOpen(false); if (sp.get("novo")) setDeal(openId); }} companies={companies} onCreated={(id) => setDeal(id)} />
-      <DealDrawer key={openId ?? "none"} dealId={openId} stages={stages} onClose={() => setDeal(null)} onChanged={() => router.refresh()} />
+      <DealDrawer key={openId ?? "none"} aiEnabled={aiEnabled} dealId={openId} stages={stages} onClose={() => setDeal(null)} onChanged={() => router.refresh()} />
       <Dialog
         open={!!lostFor}
         onClose={() => setLostFor(null)}
