@@ -16,6 +16,9 @@ export type ScoreInput = {
   hasMenu?: boolean | null;
   rating?: number | null;
   ratingCount?: number | null;
+  /** Overture: confiança de que o lugar existe (0–1) e em quantas fontes ele aparece. */
+  confidence?: number | null;
+  sourceCount?: number | null;
   hasMobileOrWhatsapp: boolean;
   hasEmail: boolean;
   hasInstagram: boolean;
@@ -58,15 +61,23 @@ export function computeScore(i: ScoreInput): ScoreResult {
   const capA = i.siteType === "site_proprio" ? A.siteCap : A.max;
   blockA = Math.min(blockA, capA);
 
-  // B. Saúde do negócio
+  // B. Saúde do negócio: avaliações do Google quando houver; senão, sinais do Overture
   const B = WEIGHTS.B;
-  const n = i.ratingCount ?? 0;
-  if (n >= 100) add("B", `${n} avaliações no Google`, B.avaliacoes100);
-  else if (n >= 30) add("B", `${n} avaliações no Google`, B.avaliacoes30);
-  else if (n >= 10) add("B", `${n} avaliações no Google`, B.avaliacoes10);
-  const r = i.rating ?? 0;
-  if (r >= 4.5) add("B", `Nota ${r.toFixed(1)}`, B.nota45);
-  else if (r >= 4.0) add("B", `Nota ${r.toFixed(1)}`, B.nota40);
+  if (i.rating != null || i.ratingCount != null) {
+    const n = i.ratingCount ?? 0;
+    if (n >= 100) add("B", `${n} avaliações no Google`, B.avaliacoes100);
+    else if (n >= 30) add("B", `${n} avaliações no Google`, B.avaliacoes30);
+    else if (n >= 10) add("B", `${n} avaliações no Google`, B.avaliacoes10);
+    const r = i.rating ?? 0;
+    if (r >= 4.5) add("B", `Nota ${r.toFixed(1)}`, B.nota45);
+    else if (r >= 4.0) add("B", `Nota ${r.toFixed(1)}`, B.nota40);
+  } else {
+    const c = i.confidence ?? 0;
+    const pct = Math.round(c * 100);
+    if (c >= 0.9) add("B", `Existência confirmada nas fontes abertas (${pct}%)`, B.confianca90);
+    else if (c >= 0.75) add("B", `Boa chance de estar ativo (${pct}%)`, B.confianca75);
+    if ((i.sourceCount ?? 0) >= 2) add("B", `Aparece em ${i.sourceCount} fontes de dados`, B.variasFontes);
+  }
   // reservado v1: CNPJ ativo > 2 anos (+5), porte ME/EPP (+5)
   const blockB = Math.min(sum(rules, "B"), B.max);
 

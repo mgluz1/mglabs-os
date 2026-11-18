@@ -12,11 +12,15 @@ export type Category = {
   coreTypes: string[];
   /** Vive de agenda: sem agendamento online vira oportunidade. */
   agenda: boolean;
+  /** Termos da taxonomia do Overture (basic_category, taxonomy.primary ou hierarquia). Igual ao scripts/overture_ingest.py. */
+  overtureTerms: string[];
+  /** basic_category do Overture a deixar de fora (ex.: laboratórios na categoria clínica). */
+  overtureExclude?: string[];
 };
 
 export const CATEGORIES: Category[] = [
-  { id: "barbearia", plural: "barbearias", label: "Barbearia", types: ["barber_shop"], coreTypes: ["barber_shop"], agenda: true },
-  { id: "academia", plural: "academias", label: "Academia", types: ["gym", "fitness_center"], coreTypes: ["gym"], agenda: true },
+  { id: "barbearia", plural: "barbearias", label: "Barbearia", types: ["barber_shop"], coreTypes: ["barber_shop"], agenda: true, overtureTerms: ["barber"] },
+  { id: "academia", plural: "academias", label: "Academia", types: ["gym", "fitness_center"], coreTypes: ["gym"], agenda: true, overtureTerms: ["gym", "fitness_studio", "martial_arts_club", "fitness_trainer"] },
   {
     id: "restaurante",
     plural: "restaurantes",
@@ -24,6 +28,7 @@ export const CATEGORIES: Category[] = [
     types: ["restaurant", "pizza_restaurant", "brazilian_restaurant", "hamburger_restaurant"],
     coreTypes: ["restaurant"],
     agenda: false,
+    overtureTerms: ["restaurant", "fast_food_restaurant"],
   },
   {
     id: "clinica",
@@ -32,6 +37,8 @@ export const CATEGORIES: Category[] = [
     types: ["dentist", "dental_clinic", "doctor", "physiotherapist", "skin_care_clinic", "medical_clinic"],
     coreTypes: ["dentist", "dental_clinic", "doctor", "physiotherapist"],
     agenda: true,
+    overtureTerms: ["outpatient_care_facility", "specialized_health_care", "behavioral_or_mental_health_clinic", "vision_or_eye_care_clinic", "pediatric_clinic", "medical_spa"],
+    overtureExclude: ["diagnostics_imaging_or_lab_service", "hospital"],
   },
   {
     id: "salao",
@@ -40,6 +47,7 @@ export const CATEGORIES: Category[] = [
     types: ["hair_salon", "beauty_salon", "nail_salon", "hair_care", "beautician"],
     coreTypes: ["hair_salon", "beauty_salon", "nail_salon"],
     agenda: true,
+    overtureTerms: ["beauty_salon", "hair_salon", "nail_salon", "skin_care_and_makeup", "eyebrow_service", "eyelash_service"],
   },
 ];
 

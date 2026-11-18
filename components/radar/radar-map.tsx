@@ -1,11 +1,13 @@
 "use client";
 
-import { AdvancedMarker, APIProvider, Circle, Map, useMap } from "@vis.gl/react-google-maps";
+import "maplibre-gl/dist/maplibre-gl.css";
+
 import { Radar } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import Map, { AttributionControl, Layer, Marker, NavigationControl, Source, useMap } from "react-map-gl/maplibre";
 
 import { BAND_COLOR, bandOf } from "@/components/lead/badges";
-import type { LatLng } from "@/lib/geo";
+import { offset, type LatLng } from "@/lib/geo";
 import type { RadarPlace } from "@/lib/types";
 
 type Props = {
@@ -19,83 +21,89 @@ type Props = {
   onSelect: (id: string) => void;
 };
 
-const KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY;
-const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || "DEMO_MAP_ID";
+// OpenFreeMap: tiles do OpenStreetMap, sem chave e sem limite de uso. Troque com NEXT_PUBLIC_MAP_STYLE.
+const STYLE = process.env.NEXT_PUBLIC_MAP_STYLE || "https://tiles.openfreemap.org/styles/dark";
+const ATTRIBUTION =
+  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> · Lugares: <a href="https://overturemaps.org" target="_blank">Overture Maps</a>';
+
+function circlePolygon(c: LatLng, radiusM: number, steps = 96): GeoJSON.Feature<GeoJSON.Polygon> {
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI;
+    const p = offset(c, Math.cos(a) * radiusM, Math.sin(a) * radiusM);
+    coords.push([p.lng, p.lat]);
+  }
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } };
+}
 
 export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPickCenter, onSelect }: Props) {
-  if (!KEY) return <MapPlaceholder />;
+  const circle = useMemo(() => circlePolygon(center, radiusM), [center, radiusM]);
   return (
-    <APIProvider apiKey={KEY} language="pt-BR" region="BR">
-      <Map
-        mapId={MAP_ID}
-        defaultCenter={center}
-        defaultZoom={13}
-        colorScheme="DARK"
-        gestureHandling="greedy"
-        disableDefaultUI
-        zoomControl
-        clickableIcons={false}
-        onClick={(e) => e.detail.latLng && onPickCenter(e.detail.latLng)}
-        className="h-full w-full"
-      >
-        <PanTo center={panTarget} />
-        <Circle center={center} radius={radiusM} strokeColor="#38bdf8" strokeOpacity={0.9} strokeWeight={1.5} fillColor="#38bdf8" fillOpacity={0.07} clickable={false} />
+    <Map
+      initialViewState={{ latitude: center.lat, longitude: center.lng, zoom: 12.5 }}
+      mapStyle={STYLE}
+      attributionControl={false}
+      onClick={(e) => onPickCenter({ lat: e.lngLat.lat, lng: e.lngLat.lng })}
+      style={{ width: "100%", height: "100%" }}
+      cursor="crosshair"
+    >
+      <FlyTo center={panTarget} radiusM={radiusM} />
+      <NavigationControl position="bottom-right" showCompass={false} />
+      <AttributionControl position="bottom-right" compact customAttribution={ATTRIBUTION} />
 
-        <AdvancedMarker position={center} zIndex={2000} clickable={false}>
-          <div className="radar-center">
-            <span className="radar-ping" />
-            <span className="radar-ping radar-ping-delay" />
-            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#0b0d12] text-sky-400 shadow-[0_0_0_2px_#38bdf8,0_8px_24px_rgba(56,189,248,.35)]">
-              <Radar className="h-[18px] w-[18px]" />
-            </span>
-          </div>
-        </AdvancedMarker>
+      <Source id="raio" type="geojson" data={circle}>
+        <Layer id="raio-fill" type="fill" paint={{ "fill-color": "#38bdf8", "fill-opacity": 0.07 }} />
+        <Layer id="raio-line" type="line" paint={{ "line-color": "#38bdf8", "line-width": 1.5, "line-opacity": 0.9 }} />
+      </Source>
 
-        {places.map((p) => {
-          const band = bandOf(p.score);
-          const sel = p.id === selectedId;
-          const color = BAND_COLOR[band];
-          return (
-            <AdvancedMarker
-              key={p.id}
-              position={{ lat: p.lat, lng: p.lng }}
+      <Marker latitude={center.lat} longitude={center.lng} anchor="center" style={{ zIndex: 5 }}>
+        <div className="radar-center pointer-events-none">
+          <span className="radar-ping" />
+          <span className="radar-ping radar-ping-delay" />
+          <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#0b0d12] text-sky-400 shadow-[0_0_0_2px_#38bdf8,0_8px_24px_rgba(56,189,248,.35)]">
+            <Radar className="h-[18px] w-[18px]" />
+          </span>
+        </div>
+      </Marker>
+
+      {places.map((p) => {
+        const color = BAND_COLOR[bandOf(p.score)];
+        const sel = p.id === selectedId;
+        return (
+          <Marker
+            key={p.id}
+            latitude={p.lat}
+            longitude={p.lng}
+            anchor="center"
+            style={{ zIndex: sel ? 4 : 2 }}
+            onClick={(e) => {
+              e.originalEvent.stopPropagation();
+              onSelect(p.id);
+            }}
+          >
+            <button
               title={`${p.name}${p.score != null ? ` · nota ${p.score}` : ""}`}
-              onClick={() => onSelect(p.id)}
-              zIndex={sel ? 1500 : 100 + (p.score ?? 0)}
+              className={`flex items-center justify-center rounded-full font-bold tabular-nums text-[#0b0d12] transition-transform hover:scale-110 ${sel ? "h-9 w-9 scale-110 text-xs" : "h-7 w-7 text-[10px]"}`}
+              style={{ background: color, boxShadow: sel ? `0 0 0 3px #fff, 0 6px 18px ${color}88` : `0 0 0 2px #0b0d12, 0 4px 12px rgba(0,0,0,.5)` }}
             >
-              <div
-                className={`flex items-center justify-center rounded-full font-bold tabular-nums text-[#0b0d12] transition-transform ${sel ? "h-9 w-9 scale-110 text-xs" : "h-7 w-7 text-[10px]"}`}
-                style={{ background: color, boxShadow: sel ? `0 0 0 3px #fff, 0 6px 18px ${color}88` : `0 0 0 2px #0b0d12, 0 4px 12px rgba(0,0,0,.5)` }}
-              >
-                {p.score ?? "…"}
-              </div>
-            </AdvancedMarker>
-          );
-        })}
-      </Map>
-    </APIProvider>
+              {p.score ?? "…"}
+            </button>
+          </Marker>
+        );
+      })}
+    </Map>
   );
 }
 
-/** Move o mapa quando o centro da busca muda (troca de cidade). */
-function PanTo({ center }: { center: LatLng }) {
-  const map = useMap();
+/** Move o mapa quando o centro muda (troca de cidade, busca aberta) e ajusta o zoom ao raio. */
+function FlyTo({ center, radiusM }: { center: LatLng; radiusM: number }) {
+  const { current: map } = useMap();
   useEffect(() => {
-    map?.panTo(center);
+    if (!map) return;
+    const zoom = Math.max(10, Math.min(15, 15.6 - Math.log2(radiusM / 400)));
+    map.flyTo({ center: [center.lng, center.lat], zoom, duration: 900 });
+    // o zoom segue o raio só quando o centro muda, para não brigar com o zoom manual
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, center]);
   return null;
-}
-
-function MapPlaceholder() {
-  return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#0b0f17]">
-      <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(#1b2433_1px,transparent_1px),linear-gradient(90deg,#1b2433_1px,transparent_1px)] [background-size:48px_48px]" />
-      <div className="absolute h-[520px] w-[520px] rounded-full border border-sky-400/30 bg-sky-400/[0.04]" />
-      <div className="absolute h-[320px] w-[320px] rounded-full border border-sky-400/15" />
-      <div className="radar-sweep absolute h-[520px] w-[520px] rounded-full" />
-      <p className="absolute bottom-6 max-w-sm text-center text-xs text-white/40">
-        Mapa desligado: defina <code className="text-white/60">NEXT_PUBLIC_GOOGLE_MAPS_KEY</code>. A busca e a lista funcionam sem ele.
-      </p>
-    </div>
-  );
 }

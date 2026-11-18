@@ -4,7 +4,7 @@ import { analyzeHtml, classifySite } from "@/lib/audit/analyze-html";
 import { distanceM, gridCover, subdivide } from "@/lib/geo";
 import { parseBrPhone, phoneFromWhatsappLink, waLink } from "@/lib/phone";
 import { computeScore, type ScoreInput } from "@/lib/score";
-import { isFranchise, nameSimilarity } from "@/lib/text";
+import { isFranchise, nameSimilarity, neighborhoodFrom } from "@/lib/text";
 
 const GOIANIA = { lat: -16.6869, lng: -49.2648 };
 
@@ -178,5 +178,34 @@ describe("Lead Score", () => {
     });
     expect(s.total).toBe(0);
     expect(s.band).toBe("frio");
+  });
+});
+
+describe("dados abertos (Overture)", () => {
+  it("tira o bairro do endereço quando dá", () => {
+    expect(neighborhoodFrom("R. 9, 330 - St. Oeste, Goiânia - GO, 74120-060")).toBe("St. Oeste");
+    expect(neighborhoodFrom("Av. T-63, 1200")).toBeNull();
+    expect(neighborhoodFrom(null)).toBeNull();
+  });
+
+  it("sem avaliações do Google, o bloco B usa confiança e número de fontes", () => {
+    const s = computeScore({
+      category: "barbearia",
+      siteType: "sem_site",
+      confidence: 0.93,
+      sourceCount: 2,
+      hasMobileOrWhatsapp: true,
+      hasEmail: false,
+      hasInstagram: false,
+      hasAnyContact: true,
+    });
+    expect(s.blockB).toBe(18);
+    expect(s.rules.some((r) => r.label.includes("93%"))).toBe(true);
+    expect(s.total).toBe(45 + 18 + 20 + 6);
+  });
+
+  it("confiança baixa não pontua", () => {
+    const s = computeScore({ category: "academia", siteType: "sem_site", confidence: 0.6, sourceCount: 1, hasMobileOrWhatsapp: false, hasEmail: false, hasInstagram: false, hasAnyContact: false });
+    expect(s.blockB).toBe(0);
   });
 });

@@ -27,7 +27,14 @@ export const places = pgTable(
   "places",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    googlePlaceId: text("google_place_id").notNull().unique(),
+    /** 'overture' (dados abertos, pode guardar) ou 'google' (cache com validade). */
+    source: text("source").default("google"),
+    overtureId: text("overture_id").unique(),
+    googlePlaceId: text("google_place_id").unique(),
+    website: text("website"),
+    phone: text("phone"),
+    confidence: numeric("confidence"),
+    sourceCount: integer("source_count"),
     name: text("name"),
     primaryType: text("primary_type"),
     category: text("category"),
@@ -60,7 +67,7 @@ export const placeContacts = pgTable(
       enum: ["whatsapp", "phone", "email", "instagram", "facebook", "site"],
     }),
     value: text("value"),
-    source: text("source", { enum: ["site_empresa", "google_places", "manual"] }),
+    source: text("source", { enum: ["site_empresa", "google_places", "overture", "manual"] }),
     confirmed: boolean("confirmed").default(false),
     collectedAt: timestamp("collected_at", { withTimezone: true }).defaultNow(),
   },
@@ -143,6 +150,7 @@ export const optouts = pgTable("optouts", {
   id: uuid("id").primaryKey().defaultRandom(),
   phone: text("phone"),
   googlePlaceId: text("google_place_id"),
+  overtureId: text("overture_id"),
   reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
@@ -169,4 +177,38 @@ export const searchResults = pgTable(
       .references(() => places.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.searchId, t.placeId] })],
+);
+
+// Lugares do Overture Maps (CDLA Permissive 2.0 / Apache 2.0) para a região de Goiânia.
+// Carregado pela GitHub Action "overture-ingest". Base própria: pode ficar guardada.
+export const ovPlaces = pgTable(
+  "ov_places",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    basicCategory: text("basic_category"),
+    taxonomyPrimary: text("taxonomy_primary"),
+    hierarchy: text("hierarchy").array(),
+    alternates: text("alternates").array(),
+    brand: text("brand"),
+    confidence: numeric("confidence"),
+    operatingStatus: text("operating_status"),
+    websites: text("websites").array(),
+    socials: text("socials").array(),
+    emails: text("emails").array(),
+    phones: text("phones").array(),
+    address: text("address"),
+    locality: text("locality"),
+    postcode: text("postcode"),
+    sourceCount: integer("source_count"),
+    geom: geographyPoint("geom"),
+    release: text("release"),
+    loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index("ov_places_geom_idx").using("gist", t.geom),
+    index("ov_places_basic_idx").on(t.basicCategory),
+    index("ov_places_primary_idx").on(t.taxonomyPrimary),
+    index("ov_places_hierarchy_idx").using("gin", t.hierarchy),
+  ],
 );

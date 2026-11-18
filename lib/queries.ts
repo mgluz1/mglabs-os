@@ -8,7 +8,13 @@ import type { Activity, Contact, LeadCard, RadarPlace } from "@/lib/types";
 
 type Row = {
   id: string;
-  google_place_id: string;
+  source: string | null;
+  overture_id: string | null;
+  google_place_id: string | null;
+  website: string | null;
+  phone: string | null;
+  confidence: string | null;
+  source_count: number | null;
   name: string | null;
   category: string | null;
   address: string | null;
@@ -40,7 +46,7 @@ type Row = {
 
 // Base: lugar + análise + nota + contatos do site + lead + opt-out.
 const BASE = sql`
-  select p.id, p.google_place_id, p.name, p.category, p.address, p.neighborhood, p.city,
+  select p.id, p.source, p.overture_id, p.google_place_id, p.website, p.phone, p.confidence::text as confidence, p.source_count, p.name, p.category, p.address, p.neighborhood, p.city,
          ST_Y(p.geom::geometry) as lat, ST_X(p.geom::geometry) as lng,
          p.rating::text as rating, p.rating_count, p.google_phone, p.google_website, p.google_maps_uri,
          a.status as audit_status, a.site_type, a.https, a.viewport, a.psi_performance, a.has_booking,
@@ -52,7 +58,8 @@ const BASE = sql`
          l.id as lead_id, l.stage as lead_stage,
          exists(select 1 from optouts o
                 where o.google_place_id = p.google_place_id
-                   or (o.phone is not null and (o.phone = p.google_phone
+                   or o.overture_id = p.overture_id
+                   or (o.phone is not null and (o.phone = p.google_phone or o.phone = p.phone
                        or o.phone in (select c2.value from place_contacts c2 where c2.place_id = p.id)))) as opted_out
   from places p
   left join site_audits a on a.place_id = p.id
@@ -61,16 +68,24 @@ const BASE = sql`
 
 function toPlace(r: Row): RadarPlace {
   const contacts: Contact[] = [...(r.contacts ?? [])];
-  const gp = parseBrPhone(r.google_phone);
+  const isOv = r.source === "overture";
+  // celular vira "provável WhatsApp"
+  for (const c of contacts) if (c.kind === "phone" && parseBrPhone(c.value)?.mobile) c.kind = "whatsapp";
+  const gp = parseBrPhone(r.phone ?? r.google_phone);
   if (gp && !contacts.some((c) => (c.kind === "phone" || c.kind === "whatsapp") && c.value === gp.e164)) {
-    contacts.push({ kind: gp.mobile ? "whatsapp" : "phone", value: gp.e164, source: "google_places", confirmed: false });
+    contacts.push({ kind: gp.mobile ? "whatsapp" : "phone", value: gp.e164, source: isOv ? "overture" : "google_places", confirmed: false });
   }
-  if (r.google_website && r.site_type === "site_proprio") {
-    contacts.push({ kind: "site", value: r.google_website, source: "google_places", confirmed: false });
+  const site = r.website ?? r.google_website;
+  if (site && r.site_type === "site_proprio") {
+    contacts.push({ kind: "site", value: site, source: isOv ? "overture" : "google_places", confirmed: false });
   }
   return {
     id: r.id,
+    source: isOv ? "overture" : "google",
+    overtureId: r.overture_id,
     googlePlaceId: r.google_place_id,
+    confidence: r.confidence == null ? null : Number(r.confidence),
+    sourceCount: r.source_count,
     name: r.name ?? "(sem nome)",
     category: r.category,
     address: r.address,
@@ -80,8 +95,8 @@ function toPlace(r: Row): RadarPlace {
     lng: Number(r.lng),
     rating: r.rating == null ? null : Number(r.rating),
     ratingCount: r.rating_count,
-    googlePhone: r.google_phone,
-    googleWebsite: r.google_website,
+    googlePhone: r.phone ?? r.google_phone,
+    googleWebsite: site,
     googleMapsUri: r.google_maps_uri,
     auditStatus: r.audit_status,
     siteType: r.site_type,

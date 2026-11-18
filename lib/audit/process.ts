@@ -18,6 +18,8 @@ type Claimed = {
   rating: string | null;
   rating_count: number | null;
   google_phone: string | null;
+  confidence: string | null;
+  source_count: number | null;
 };
 
 /** Pega até `limit` análises pendentes sem colidir com outro lote (skip locked). */
@@ -33,7 +35,8 @@ async function claim(limit: number): Promise<Claimed[]> {
     update site_audits a set status = 'running', audited_at = now()
     from picked, places p
     where a.id = picked.id and p.id = a.place_id
-    returning a.id as audit_id, a.place_id, a.url, p.category, p.rating::text as rating, p.rating_count, p.google_phone`);
+    returning a.id as audit_id, a.place_id, a.url, p.category, p.rating::text as rating, p.rating_count,
+              coalesce(p.phone, p.google_phone) as google_phone, p.confidence::text as confidence, p.source_count`);
   return rows;
 }
 
@@ -51,7 +54,7 @@ async function auditOne(c: Claimed): Promise<void> {
   }
 
   // contatos que a própria empresa publicou no site (podem ser guardados)
-  const contacts: { kind: string; value: string; confirmed: boolean }[] = [];
+  const contacts: { kind: string; value: string; confirmed: boolean; stored?: boolean }[] = [];
   if (signals) {
     for (const v of signals.contacts.whatsapp) contacts.push({ kind: "whatsapp", value: v, confirmed: true });
     for (const v of signals.contacts.phones) contacts.push({ kind: "phone", value: v, confirmed: false });
@@ -67,6 +70,9 @@ async function auditOne(c: Claimed): Promise<void> {
     if (p) contacts.push({ kind: "whatsapp", value: p.e164, confirmed: true });
   }
 
+  // contatos já guardados para o lugar (ex.: vindos do Overture)
+  const { rows: stored } = await db.execute<{ kind: string; value: string }>(sql`select kind, value from place_contacts where place_id = ${c.place_id}`);
+  for (const x of stored) if (!contacts.some((y) => y.kind === x.kind && y.value === x.value)) contacts.push({ ...x, confirmed: false, stored: true });
   const googlePhone = parseBrPhone(c.google_phone);
   const hasMobileOrWhatsapp = Boolean(googlePhone?.mobile) || contacts.some((x) => x.kind === "whatsapp" || (x.kind === "phone" && parseBrPhone(x.value)?.mobile));
   const score = computeScore({
@@ -83,6 +89,8 @@ async function auditOne(c: Claimed): Promise<void> {
     hasMenu: signals?.hasMenu ?? false,
     rating: c.rating == null ? null : Number(c.rating),
     ratingCount: c.rating_count,
+    confidence: c.confidence == null ? null : Number(c.confidence),
+    sourceCount: c.source_count,
     hasMobileOrWhatsapp,
     hasEmail: contacts.some((x) => x.kind === "email"),
     hasInstagram: contacts.some((x) => x.kind === "instagram"),
@@ -103,11 +111,12 @@ async function auditOne(c: Claimed): Promise<void> {
         signals = ${JSON.stringify(signalsJson)}::jsonb, approachable = ${score.approachable},
         status = 'done', error = ${fetchError}, audited_at = now()
       where id = ${c.audit_id}`);
-    if (contacts.length) {
+    const fresh = contacts.filter((x) => !x.stored);
+    if (fresh.length) {
       await tx.execute(sql`
         insert into place_contacts (place_id, kind, value, source, confirmed)
         select ${c.place_id}::uuid, r.kind, r.value, 'site_empresa', r.confirmed
-        from jsonb_to_recordset(${JSON.stringify(contacts)}::jsonb) as r(kind text, value text, confirmed boolean)
+        from jsonb_to_recordset(${JSON.stringify(fresh.map(({ kind, value, confirmed }) => ({ kind, value, confirmed })))}::jsonb) as r(kind text, value text, confirmed boolean)
         on conflict (place_id, kind, value) do update set confirmed = place_contacts.confirmed or excluded.confirmed, collected_at = now()`);
     }
     await tx.execute(sql`
