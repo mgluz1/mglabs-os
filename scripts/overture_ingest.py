@@ -21,14 +21,14 @@ RELEASE = os.environ.get("OVERTURE_RELEASE") or "2026-10-21.0"
 # Goiânia + Aparecida de Goiânia + entorno imediato (Senador Canedo, Trindade, Goianira)
 BBOX = dict(xmin=-49.50, xmax=-49.05, ymin=-16.95, ymax=-16.50)
 
-# Categorias do radar: casa por basic_category, taxonomy.primary ou qualquer nível da hierarquia.
-# Ajuste depois de rodar `profile`.
+# Categorias do radar (mesmos termos de lib/config/categories.ts → overtureTerms).
+# Casa por basic_category, taxonomy.primary ou qualquer nível da hierarquia. Revisto com `profile` (release 2026-10-21.0).
 TERMS = {
-    "barbearia": ["barber", "barber_shop", "barbershop"],
-    "salao": ["hair_salon", "beauty_salon", "nail_salon", "hair_care", "beauty_and_spa", "beautician", "hair_stylist", "eyelash_service", "eyebrow_service", "makeup_artist"],
-    "academia": ["gym", "fitness_center", "fitness_studio", "pilates_studio", "crossfit_gym", "yoga_studio", "martial_arts_club", "boxing_gym", "personal_trainer"],
-    "restaurante": ["restaurant", "pizza_restaurant", "steakhouse", "burger_restaurant", "brazilian_restaurant", "japanese_restaurant", "sushi_restaurant", "casual_eatery", "bar_and_grill"],
-    "clinica": ["dentist", "dental_clinic", "medical_clinic", "doctor", "physical_therapy", "physiotherapist", "dermatologist", "medical_center", "aesthetician", "medical_spa", "skin_care", "psychologist", "nutritionist", "ophthalmologist", "orthodontist", "chiropractor", "health_and_medical"],
+    "barbearia": ["barber"],
+    "salao": ["beauty_salon", "hair_salon", "nail_salon", "skin_care_and_makeup", "eyebrow_service", "eyelash_service"],
+    "academia": ["gym", "fitness_studio", "martial_arts_club", "fitness_trainer"],
+    "restaurante": ["restaurant", "fast_food_restaurant"],
+    "clinica": ["outpatient_care_facility", "specialized_health_care", "behavioral_or_mental_health_clinic", "vision_or_eye_care_clinic", "pediatric_clinic", "medical_spa"],
 }
 ALL_TERMS = sorted({t for v in TERMS.values() for t in v})
 
