@@ -19,7 +19,8 @@ Foco inicial: **Goiânia e Aparecida de Goiânia**, categorias **barbearia, acad
 ## Stack obrigatória
 
 - **Next.js 15 (App Router) + TypeScript + Tailwind**, Server Actions para as operações.
-- **Supabase** (Postgres) com as extensões `postgis` e `pg_trgm`. Use o cliente `@supabase/supabase-js` só no servidor (service role), nunca exposto no navegador.
+- **Neon** (Postgres serverless) com as extensões `postgis` e `pg_trgm`. Acesso pelo driver `@neondatabase/serverless` + **Drizzle ORM** (`drizzle-orm/neon-http`), só no servidor. Use a connection string **pooled** (`-pooler` no host) no app e a direta só para migrations.
+- Migrations em SQL puro versionadas em `db/migrations`, aplicadas com `drizzle-kit migrate` (ou um script `npm run db:migrate`). A primeira migration cria as extensões.
 - **Google Maps Platform**: Maps JavaScript API (mapa) + **Places API (New)** via REST no servidor. Use o mapa do Google (não Leaflet/OSM), porque os termos do Google restringem mostrar dados do Places em mapa de terceiros.
 - **PageSpeed Insights API** (gratuita) para nota técnica do site.
 - **Anthropic API** (modelo `claude-sonnet-4-5` ou o mais recente disponível — deixe configurável em env) para gerar a mensagem.
@@ -34,8 +35,9 @@ NEXT_PUBLIC_GOOGLE_MAPS_KEY=  # chave de navegador, restrita por domínio à Map
 PAGESPEED_API_KEY=
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-5
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+DATABASE_URL=                 # Neon, connection string pooled (host com -pooler)
+DATABASE_URL_UNPOOLED=        # Neon, conexão direta, só para migrations
+CRON_SECRET=                  # protege as rotas /api/cron/*
 APP_PASSWORD=
 MEU_NOME=Miguel
 PLACES_MONTHLY_CAP=900        # trava de segurança de chamadas Enterprise/mês
@@ -81,7 +83,8 @@ Regras:
 - **Contador de cota:** registrar cada chamada numa tabela `api_usage` (mês, endpoint, quantidade). Antes de buscar, estimar quantas chamadas a grade vai usar e **bloquear com aviso** se passar de `PLACES_MONTHLY_CAP`. Mostrar o uso do mês no topo da tela.
 - **Descartar:** `businessStatus` diferente de `OPERATIONAL`; franquias/redes por lista editável em `config/franquias.ts` (Smart Fit, BlueFit, Bodytech, Panobianco, Bio Ritmo, Selfit, Espaçolaser, Sorridents, OdontoCompany, Oral Sin, McDonald's, Burger King, Subway, Outback… — comparação por nome normalizado, sem acento e minúsculo).
 - **Deduplicar** também por nome parecido (`similarity` do `pg_trgm` ≥ 0,85) a menos de 50 m.
-- Resultados aparecem na tela assim que a busca do Google termina; a análise de site roda depois, em segundo plano (Funcionalidade 2), e a lista se atualiza (polling a cada 3 s ou Supabase Realtime).
+- Resultados aparecem na tela assim que a busca do Google termina; a análise de site roda depois, em segundo plano (Funcionalidade 2), e a lista se atualiza por polling a cada 3 s.
+- **Fila sem serviço extra:** cada lugar novo ganha uma linha em `site_audits` com `status = 'pending'`. O processamento roda em lotes de 5 dentro de uma rota `POST /api/audits/process` (chamada pelo próprio polling da tela enquanto houver pendentes, e via `after()` do Next.js logo depois da busca). Use `select … for update skip locked` para dois lotes nunca pegarem o mesmo lugar. Cada execução precisa caber em ~50 s (limite de função serverless).
 
 ## Funcionalidade 2 — Análise de site e Lead Score
 
@@ -230,7 +233,7 @@ create table api_usage (
 );
 ```
 
-**Cache do Google:** ao abrir um lead com `google_cached_until` vencido, atualizar com **Place Details (New)** (mesmos campos). Um cron diário (rota `/api/cron/purge`) limpa os campos `google_*`, `rating`, `rating_count` e `address` de lugares que **não estão no CRM** e estão vencidos há mais de 30 dias. Contatos com `source = 'site_empresa'` e dados do CRM ficam.
+**Cache do Google:** ao abrir um lead com `google_cached_until` vencido, atualizar com **Place Details (New)** (mesmos campos). Um cron diário (rota `/api/cron/purge`, agendada no `vercel.json` ou no agendador da hospedagem e protegida por `CRON_SECRET`) limpa os campos `google_*`, `rating`, `rating_count` e `address` de lugares que **não estão no CRM** e estão vencidos há mais de 30 dias. Contatos com `source = 'site_empresa'` e dados do CRM ficam.
 
 ## Regras que não podem ser quebradas
 
@@ -247,7 +250,7 @@ create table api_usage (
 3. Analisador de site + PageSpeed + Lead Score + selos + painel "Por que essa nota".
 4. Painel do lead com contatos, geração de mensagem com IA e botão WhatsApp.
 5. CRM kanban, follow-ups, opt-out e exportação CSV.
-6. README com: como criar as chaves no Google Cloud (ativar Places API (New), Maps JavaScript API e PageSpeed; **definir cota diária e alerta de orçamento**), Supabase e Anthropic; como rodar local; como publicar.
+6. README com: como criar as chaves no Google Cloud (ativar Places API (New), Maps JavaScript API e PageSpeed; **definir cota diária e alerta de orçamento**), Neon (criar projeto na região `aws-sa-east-1` São Paulo, pegar as duas connection strings, rodar as migrations) e Anthropic; como rodar local; como publicar.
 
 ## Critérios de aceite
 
