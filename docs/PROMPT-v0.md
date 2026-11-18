@@ -19,13 +19,13 @@ Foco inicial: **Goiânia e Aparecida de Goiânia**, categorias **barbearia, acad
 ## Stack obrigatória
 
 - **Next.js 15 (App Router) + TypeScript + Tailwind**, Server Actions para as operações.
-- **Neon** (Postgres serverless) com as extensões `postgis` e `pg_trgm`. Acesso pelo driver `@neondatabase/serverless` + **Drizzle ORM** (`drizzle-orm/neon-http`), só no servidor. Use a connection string **pooled** (`-pooler` no host) no app e a direta só para migrations.
+- **Neon** (Postgres serverless) com as extensões `postgis` e `pg_trgm`. Acesso pelo driver `pg` (node-postgres) com pool e `attachDatabasePool` da Vercel + **Drizzle ORM** (`drizzle-orm/node-postgres`), só no servidor. Use a connection string **pooled** (`-pooler` no host) no app e a direta só para migrations.
 - Migrations em SQL puro versionadas em `db/migrations`, aplicadas com `drizzle-kit migrate` (ou um script `npm run db:migrate`). A primeira migration cria as extensões.
 - **Google Maps Platform**: Maps JavaScript API (mapa) + **Places API (New)** via REST no servidor. Use o mapa do Google (não Leaflet/OSM), porque os termos do Google restringem mostrar dados do Places em mapa de terceiros.
 - **PageSpeed Insights API** (gratuita) para nota técnica do site.
 - **Anthropic API** (modelo `claude-sonnet-4-5` ou o mais recente disponível — deixe configurável em env) para gerar a mensagem.
 - `cheerio` para ler o HTML dos sites.
-- Acesso protegido por senha única (middleware + cookie httpOnly assinado com `APP_PASSWORD`). Sem cadastro de usuários nesta versão.
+- Login com **Neon Auth** (Managed Better Auth, `@neon/auth`), e-mail e senha. Depois de criar a sua conta, desligar o cadastro público no Neon.
 
 ### Variáveis de ambiente (`.env.example`)
 
@@ -38,7 +38,8 @@ ANTHROPIC_MODEL=claude-sonnet-4-5
 DATABASE_URL=                 # Neon, connection string pooled (host com -pooler)
 DATABASE_URL_UNPOOLED=        # Neon, conexão direta, só para migrations
 CRON_SECRET=                  # protege as rotas /api/cron/*
-APP_PASSWORD=
+NEON_AUTH_BASE_URL=
+NEON_AUTH_COOKIE_SECRET=
 MEU_NOME=Miguel
 PLACES_MONTHLY_CAP=900        # trava de segurança de chamadas Enterprise/mês
 ```
