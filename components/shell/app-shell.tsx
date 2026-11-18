@@ -89,7 +89,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
       </a>
       <div className="flex h-dvh w-full overflow-hidden">
         {/* desktop */}
-        <aside data-app-chrome className={`hidden shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200 md:flex ${collapsed ? "w-[68px]" : "w-60"}`}>
+        <aside data-app-chrome className={`hidden shrink-0 flex-col border-r border-line bg-background transition-[width] duration-200 md:flex ${collapsed ? "w-[68px]" : "w-60"}`}>
           <div className={`flex h-14 items-center ${collapsed ? "justify-center" : "px-4"}`}>
             <Link href="/dashboard" aria-label="mglabs — início">
               <Brand compact={collapsed} />
@@ -118,7 +118,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header data-app-chrome className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface/80 px-3 backdrop-blur sm:px-4">
+          <header data-app-chrome className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-background/85 px-3 backdrop-blur sm:px-4">
             <button onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-muted hover:bg-fg/8 md:hidden" aria-label="Abrir menu">
               <Menu className="h-5 w-5" />
             </button>
@@ -127,7 +127,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
             </span>
             <button
               onClick={() => setPaletteOpen(true)}
-              className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-background/60 px-3 text-left text-sm text-muted transition hover:border-fg/25 sm:max-w-md"
+              className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-left text-sm text-muted transition hover:border-fg/25 sm:max-w-md"
               aria-label="Abrir busca global"
             >
               <Search className="h-4 w-4 shrink-0" aria-hidden />
@@ -174,10 +174,10 @@ function ActiveNav({ compact, onNavigate }: { compact: boolean; onNavigate?: () 
 
 function NavList({ compact, pathname, onNavigate }: { compact: boolean; pathname: string; onNavigate?: () => void }) {
   return (
-    <nav aria-label="Navegação principal" className="flex-1 space-y-4 overflow-y-auto px-2 pb-3">
+    <nav aria-label="Navegação principal" className="flex-1 space-y-5 overflow-y-auto px-2 pb-3 pt-3">
       {NAV.map((g) => (
         <div key={g.label}>
-          {!compact ? <div className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">{g.label}</div> : <div className="mx-3 mb-1 border-t border-line first:hidden" />}
+          {!compact ? <div className="eyebrow px-2.5 pb-1.5">{g.label}</div> : <div className="mx-3 mb-1 border-t border-line first:hidden" />}
           <ul className="space-y-0.5">
             {g.items.map((i) => {
               const active = pathname === i.href || pathname.startsWith(i.href + "/");
@@ -188,7 +188,7 @@ function NavList({ compact, pathname, onNavigate }: { compact: boolean; pathname
                     onClick={onNavigate}
                     title={compact ? i.label : undefined}
                     aria-current={active ? "page" : undefined}
-                    className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-colors ${compact ? "justify-center" : ""} ${active ? "bg-brand/12 font-medium text-fg" : "text-fg/70 hover:bg-fg/6 hover:text-fg"}`}
+                    className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-colors ${compact ? "justify-center" : ""} ${active ? "bg-surface font-medium text-fg shadow-[0_0_0_1px_var(--line)]" : "text-fg/70 hover:bg-fg/5 hover:text-fg"}`}
                   >
                     {active && <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r bg-brand" aria-hidden />}
                     <i.icon className={`h-[17px] w-[17px] shrink-0 ${active ? "text-brand" : "text-muted group-hover:text-fg"}`} aria-hidden />

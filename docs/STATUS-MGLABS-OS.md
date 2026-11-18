@@ -8,9 +8,9 @@ Legenda: ✅ funcional com persistência real · 🟡 inicial (funciona, mas fal
 
 | Módulo | Estado | O que existe | O que falta |
 | --- | --- | --- | --- |
-| **Shell / design** | ✅ | Marca oficial (`public/brand`), tema escuro padrão + claro, Inter + Space Grotesk, sidebar recolhível e responsiva (gaveta no celular), busca global `Ctrl/Cmd+K`, atalhos `g`+letra, skeletons, estados vazios, erro/404, foco visível, `prefers-reduced-motion`, impressão | Fraunces em onboarding/empty states; notificações no topo (ícone) |
+| **Shell / design** | ✅ | Marca oficial (`public/brand`), tema **claro padrão** (linguagem Chiarelli: névoa/floresta, Fraunces + Inter + JetBrains Mono) + escuro, sidebar recolhível e responsiva (gaveta no celular), busca global `Ctrl/Cmd+K`, atalhos `g`+letra, skeletons, estados vazios, erro/404, foco visível, `prefers-reduced-motion`, impressão | Fraunces em onboarding/empty states; notificações no topo (ícone) |
 | **Dashboard** | ✅ | Leads, oportunidades ativas, tarefas (atrasadas/hoje), fechados, valor do funil (previsto e ponderado), recebido, quatro números do dinheiro, funil por etapa, follow-ups, atividades, filtro 7/30/90 dias. Tudo por SQL, vazio mostra ações para começar | Metas; conversão contato→resposta→proposta→fechamento; período personalizado |
-| **Radar** | ✅ | Preservado (busca Overture, mapa, Lead Score e justificativas, contatos com origem, opt-out). Agora: "Adicionar ao CRM" cria empresa + oportunidade sem duplicar; "Escrever mensagem" abre o Estúdio; mapa claro/escuro; sem botão de contato para quem pediu opt-out | Listas salvas/favoritos; filtros salvos; confirmar contato manualmente |
+| **Radar** | ✅ | Fluxo no padrão ProspecZ (Encontre clientes → resultados com Dinheiro em jogo e Abordar agora → ficha com anel da nota, etapas e cartões). Mapa **OpenStreetMap padrão** (tiles raster; worker do MapLibre servido de `/public/maplibre`). Busca Overture, Lead Score, contatos com origem, opt-out e integração com CRM/Estúdio preservados. Celular em folha inferior | Fotos do negócio e horário (não há fonte aberta); listas salvas/favoritos; confirmar contato manualmente |
 | **CRM** | ✅ | Empresas, contatos, oportunidades independentes do Radar; quadro arrastável (mouse/teclado) + tabela; ficha em painel (visão geral, histórico, tarefas, propostas); notas, ligação, resposta, reunião; valor, probabilidade, próximo passo, prazo, motivo de perda obrigatório, origem; busca e filtros; histórico persistente com antes/depois; "fechar e criar projeto"; "não contatar mais"; export CSV | Importação CSV com revisão/deduplicação; pipelines múltiplos (hoje um pipeline, etapas renomeáveis); responsável por oportunidade na UI |
 | **Empresas e contatos** | ✅ | Lista, ficha 360° (dados, contatos, oportunidades, tarefas, propostas, projetos, financeiro, timeline), arquivar, opt-out | Mesclar duplicadas; consentimento detalhado (LGPD) |
 | **Estúdio de Mensagens** | ✅ | Empresa/oportunidade → fatos verificados (Radar), 7 objetivos, serviço, tom, canal, destinatário, modelos versionados com variáveis, editor livre, copiar, rascunhos, salvar como modelo, abrir `wa.me`, confirmação "Mandou?" → histórico + follow-up em 3 dias; IA opcional (3 variações) | Anexar versão/fatos à atividade além do que já vai em `meta`; rascunho de e-mail por integração |
@@ -24,6 +24,23 @@ Legenda: ✅ funcional com persistência real · 🟡 inicial (funciona, mas fal
 | **Configurações** | ✅ | Espaço/equipe (leitura), etapas (nome e probabilidade), status da IA e uso diário, tokens do MCP, atalhos | Convite de membros; retenção/LGPD; edição do catálogo aqui (hoje em Propostas) |
 | **IA (Gemini)** | ✅ | `lib/ai/*`: variações de mensagem (Estúdio) e, na ficha da oportunidade, resumo, próxima ação e sugestão de tarefas — tudo editável, com autorização explícita, dados anonimizados e limite diário | Propostas (escopo), Radar (explicar o lead) e análises do dashboard por IA |
 | **MCP** | ✅ | `/api/mcp`, tokens próprios escopados, 9 ferramentas de leitura e 4 de escrita controlada | Criar rascunho de proposta; ferramentas de Conhecimento; OAuth em vez de token manual |
+
+## Design atual (18/11/2026)
+
+Os documentos `docs/DESIGN-SYSTEM-MGLABS-OS.md` e o PRD ainda estão no PR #5 (só documentação). Até lá, o que vale é isto:
+
+**Modo claro como padrão, inspirado no Chiarelli Core** (o escuro continua no botão do topo), mantendo o verde e a marca mglabs:
+- Cores (claro): fundo névoa `#f4f5ef`, superfície `#ffffff`, texto floresta `#0f1f17`, secundário `#5a6356`, linhas finas `#e2e5da` (fortes `#c7cbb8`), marca `#0b5a3e` (hover `#08734c`), tom suave `#e8f2ec`, sucesso `#1f7a4d`, alerta `#a9481b`, erro `#a8283f`, info `#2f6690`.
+- Tipografia: títulos de página e números grandes em **Fraunces**; interface em **Inter**; rótulos de seção em **JetBrains Mono** caixa alta (`.eyebrow`); o nome "mglabs." segue em Space Grotesk, como na logo.
+- Forma: cartões com raio 12 px e borda fina, controles com 8 px, sombra só em elementos flutuantes (`--shadow-float`).
+
+**Radar no fluxo do ProspecZ** (busca → resultados no mapa → ficha), com marca, código e ícones próprios:
+- Mapa: OpenStreetMap padrão (tiles raster de openstreetmap.org, com atribuição), círculo do raio em verde, pinos brancos com anel colorido pela nota; atenuado no tema escuro.
+- Busca: cartão "Encontre clientes" — Você vende, Para quem (campo com sugestões + atalhos), Onde (cidade ou clique no mapa), Raio e o botão principal.
+- Resultados: "‹ Nova busca", total, **Dinheiro em jogo** (preço editável), **Abordar agora** (abre o próximo negócio com contato no Estúdio), filtros e lista com a nota em anel.
+- Ficha: anel da nota, etiquetas, **etapas do funil em pílulas** (escolher uma adiciona ao CRM), cartões "Por que é uma oportunidade" e "Contato", "Pediu para não ser contatado".
+- Celular: mapa em cima, resultados numa folha inferior, ficha em tela cheia.
+- Diferenças inevitáveis: a base aberta (Overture) não tem fotos, nota do Google nem horário de funcionamento; no lugar aparecem a confiança e o número de fontes.
 
 ## Decisões e desvios (com justificativa)
 

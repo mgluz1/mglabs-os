@@ -9,7 +9,7 @@ Produto: `docs/CRM-MGLABS-OS-PRD.md` e `docs/DESIGN-SYSTEM-MGLABS-OS.md`. **Esta
 ## Regras do projeto
 
 - Responder e escrever textos de interface em português do Brasil.
-- Stack: Next.js (App Router) + TypeScript + Tailwind + Neon (Postgres serverless com PostGIS e pg_trgm) via `pg` (node-postgres, pool + `attachDatabasePool`) + Drizzle; Neon Auth gerenciado via `@neon/auth`. Mapa OpenStreetMap (OpenFreeMap + MapLibre via `react-map-gl/maplibre`); negócios da base aberta Overture Maps (tabela `ov_places`). Gemini (`@google/genai`, opcional) para sugestões de IA; MCP (`@modelcontextprotocol/sdk`) para o Claude Code.
+- Stack: Next.js (App Router) + TypeScript + Tailwind + Neon (Postgres serverless com PostGIS e pg_trgm) via `pg` (node-postgres, pool + `attachDatabasePool`) + Drizzle; Neon Auth gerenciado via `@neon/auth`. Mapa OpenStreetMap padrão (tiles raster de openstreetmap.org + MapLibre via `react-map-gl/maplibre`; worker em `/public/maplibre`, copiado no predev/prebuild); negócios da base aberta Overture Maps (tabela `ov_places`). Gemini (`@google/genai`, opcional) para sugestões de IA; MCP (`@modelcontextprotocol/sdk`) para o Claude Code.
 - Chaves de API só no servidor (nenhuma chave vai para o navegador).
 - Dados de negócios só do Overture Maps (dados abertos) e da página inicial do site oficial da empresa. Nada de scraping do Google Maps, Instagram ou outras plataformas.
 - Não misturar conteúdo da Places API do Google com o mapa OSM (os termos do Google proíbem). O código antigo `lib/places/google.ts` fica sem uso.
@@ -28,6 +28,6 @@ Produto: `docs/CRM-MGLABS-OS-PRD.md` e `docs/DESIGN-SYSTEM-MGLABS-OS.md`. **Esta
 - Páginas: `<Gate>{async (ctx) => …}</Gate>` (`components/shell/gate.tsx`) cuida de sessão, Suspense e "sem acesso". Ao criar rota nova, rode `npx next typegen`.
 - Dinheiro em centavos (`lib/money.ts`), datas no fuso de São Paulo (`lib/dates.ts`). Previsto × contratado × a receber × recebido nunca se misturam; "paga/vencida" são derivados dos pagamentos.
 - IA: sempre opcional e desacoplada (`lib/ai/gemini.ts`); `sanitizeForAi()` antes de enviar; nunca enviar nomes de contatos, telefones, e-mails, valores ou histórico completo; sugestões nunca são gravadas sem ação humana; nada de envio automático de mensagens.
-- Cores só por tokens (`bg-surface`, `text-fg`, `text-muted`, `border-line`, `bg-brand`…) definidos em `app/globals.css`; temas escuro (padrão) e claro. Classes `.btn`, `.input`, `.card` ficam em `@layer components`.
+- Cores só por tokens (`bg-surface`, `text-fg`, `text-muted`, `border-line`, `bg-brand`, `bg-brand-soft`…) definidos em `app/globals.css`; tema claro (padrão, linguagem Chiarelli) e escuro. Títulos em Fraunces (`h1`/`.font-heading`), rótulos de seção com `.eyebrow` (mono). Classes `.btn`, `.input`, `.card` ficam em `@layer components`.
 - Migration `0005` guarda os dados antigos (`leads`, `activities`) intactos; não removê-los sem plano de migração revisado.
 - Testes: `npm test` (puros) e `tests/integration-crm.test.ts` com `TEST_DATABASE_URL`. Não criar bypass de autenticação nem para testes locais: a revisão visual usa `/dev-preview/os` (só em desenvolvimento com `UI_PREVIEW=1`, dados fictícios).

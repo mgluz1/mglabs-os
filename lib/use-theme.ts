@@ -14,7 +14,7 @@ function subscribe(cb: () => void) {
 export function useTheme(): ThemeName {
   return useSyncExternalStore(
     subscribe,
-    () => (document.documentElement.dataset.theme === "light" ? "light" : "dark"),
-    () => "dark",
+    () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light"),
+    () => "light",
   );
 }

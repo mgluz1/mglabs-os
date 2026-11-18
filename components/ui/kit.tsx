@@ -13,7 +13,7 @@ export function PageHeader({ title, description, actions, back }: { title: strin
             ← {back.label}
           </Link>
         )}
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-[28px] leading-tight">{title}</h1>
         {description && <p className="mt-1 max-w-2xl text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -30,7 +30,7 @@ export function SectionCard({ title, action, children, className, pad = true }: 
     <section className={cx("card", className)}>
       {(title || action) && (
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="eyebrow">{title}</h2>
           {action}
         </div>
       )}
@@ -41,12 +41,12 @@ export function SectionCard({ title, action, children, className, pad = true }: 
 
 export function Kpi({ label, value, hint, href, tone }: { label: string; value: ReactNode; hint?: ReactNode; href?: string; tone?: "danger" | "ok" | "warn" }) {
   const body = (
-    <div className="card h-full p-4 transition hover:border-fg/25">
-      <div className="flex items-center justify-between text-xs text-muted">
-        <span>{label}</span>
+    <div className="card h-full p-4 transition hover:border-line-strong">
+      <div className="flex items-center justify-between text-muted">
+        <span className="eyebrow">{label}</span>
         {href && <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />}
       </div>
-      <div className={cx("mt-1.5 font-heading text-2xl font-semibold tabular-nums", tone === "danger" && "text-danger", tone === "warn" && "text-warn", tone === "ok" && "text-ok")}>{value}</div>
+      <div className={cx("mt-2 font-heading text-[28px] leading-none tabular-nums", tone === "danger" && "text-danger", tone === "warn" && "text-warn", tone === "ok" && "text-ok")}>{value}</div>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );
@@ -67,7 +67,7 @@ export function EmptyState({ icon: Icon, title, description, action }: { icon?: 
           <Icon className="h-5 w-5" aria-hidden />
         </span>
       )}
-      <h3 className="font-heading text-base font-semibold">{title}</h3>
+      <h3 className="font-heading text-lg">{title}</h3>
       {description && <p className="mt-1 max-w-md text-sm text-muted">{description}</p>}
       {action && <div className="mt-4 flex flex-wrap justify-center gap-2">{action}</div>}
     </div>
@@ -140,4 +140,8 @@ export function Field({ label, children, hint, className }: { label: string; chi
 
 export function priorityTone(p: string): Tone {
   return p === "urgente" ? "danger" : p === "alta" ? "warn" : p === "baixa" ? "neutral" : "info";
+}
+
+export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx("eyebrow", className)}>{children}</div>;
 }

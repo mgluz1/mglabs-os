@@ -10,5 +10,5 @@ export default auth.middleware({
 
 export const config = {
   // ativos estáticos da marca (/brand) precisam carregar também na tela de login
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/|maplibre/).*)"],
 };

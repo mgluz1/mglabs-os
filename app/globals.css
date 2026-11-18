@@ -1,13 +1,15 @@
 @import "tailwindcss";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/jetbrains-mono";
 
 /*
  * MGLABS OS — tokens de design (docs/DESIGN-SYSTEM-MGLABS-OS.md).
- * Escuro (padrão): paleta do portfólio miguelluz. Claro: paleta da landing mglabs.
+ * Claro (padrão): papel névoa + floresta, linhas finas, títulos editoriais (Fraunces) e rótulos em mono.
+ * Escuro: paleta do portfólio miguelluz.
  * Verde = cor de ação. Status sempre com texto/ícone, nunca só cor.
  */
-:root,
 :root[data-theme="dark"] {
   --background: #070d14;
   --surface: #0e1620;
@@ -22,23 +24,30 @@
   --warn: #f0c25a;
   --info: #7cb4ff;
   --ok: #38d385;
+  --line-strong: #2d3e50;
+  --brand-soft: rgba(56, 211, 133, 0.1);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px -8px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
 
+:root,
 :root[data-theme="light"] {
-  --background: #f6f7f9;
+  --background: #f4f5ef;
   --surface: #ffffff;
-  --elevated: #f9f9fb;
-  --foreground: #18181b;
-  --muted: #5f5f6b;
-  --line: #e2e4e9;
-  --brand: #064e3b;
-  --brand-hover: #047857;
+  --elevated: #fafbf7;
+  --foreground: #0f1f17;
+  --muted: #5a6356;
+  --line: #e2e5da;
+  --line-strong: #c7cbb8;
+  --brand: #0b5a3e;
+  --brand-hover: #08734c;
   --brand-on: #ffffff;
-  --danger: #b42318;
-  --warn: #9a5b00;
-  --info: #1d4ed8;
-  --ok: #047857;
+  --brand-soft: #e8f2ec;
+  --danger: #a8283f;
+  --warn: #a9481b;
+  --info: #2f6690;
+  --ok: #1f7a4d;
+  --shadow-float: 0 1px 2px rgba(15, 31, 23, 0.06), 0 12px 32px -8px rgba(15, 31, 23, 0.18);
   color-scheme: light;
 }
 
@@ -50,6 +59,8 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-brand-soft: var(--brand-soft);
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
   --color-brand-on: var(--brand-on);
@@ -58,10 +69,13 @@
   --color-info: var(--info);
   --color-ok: var(--ok);
   --font-sans: "Inter Variable", system-ui, sans-serif;
-  --font-heading: "Space Grotesk Variable", "Inter Variable", sans-serif;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
+  --font-heading: "Fraunces Variable", Georgia, serif;
+  --font-brand: "Space Grotesk Variable", "Inter Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --shadow-float: var(--shadow-float);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 }
 
 html {
@@ -76,12 +90,30 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Títulos editoriais (Fraunces) — inspiração Chiarelli Core */
 h1,
-h2,
-h3,
 .font-heading {
   font-family: var(--font-heading);
-  letter-spacing: -0.01em;
+  font-optical-sizing: auto;
+  font-weight: 560;
+  letter-spacing: -0.015em;
+}
+h2,
+h3 {
+  letter-spacing: -0.005em;
+}
+.font-brand {
+  font-family: var(--font-brand);
+}
+
+/* Rótulo de seção em mono, caixa alta e espaçado ("PRÓXIMO PASSO") */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 ::selection {

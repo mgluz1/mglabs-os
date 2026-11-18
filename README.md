@@ -58,7 +58,7 @@ Ferramentas: `search`, `list_leads`, `get_lead`, `list_companies`, `get_company`
 
 ## Mapa e dados dos negócios (grátis)
 
-- **Mapa**: OpenStreetMap via [OpenFreeMap](https://openfreemap.org) (estilos escuro/claro, sem chave), desenhado com MapLibre.
+- **Mapa**: o OpenStreetMap padrão (os mesmos tiles de openstreetmap.org), desenhado com MapLibre, com atribuição. Uso leve, conforme a [política de tiles da OSMF](https://operations.osmfoundation.org/policies/tiles/); se o volume crescer, aponte `NEXT_PUBLIC_MAP_TILES` para outro servidor de tiles (ou `NEXT_PUBLIC_MAP_STYLE` para um estilo vetorial). O worker do MapLibre é copiado para `public/maplibre` no `predev`/`prebuild`.
 - **Negócios**: [Overture Maps](https://overturemaps.org) (CDLA Permissive 2.0), recortados para Goiânia e Aparecida por `scripts/overture_ingest.py`. O GitHub Action `overture-ingest` roda todo dia 25 e publica na branch `data-overture`; o cron `/api/cron/overture` importa no dia 26 (ou em **/status → Atualizar base agora**).
 - Dados só do Overture e da página inicial do site oficial da empresa. Nada de scraping do Google Maps/Instagram. O WhatsApp nunca é automatizado: o app só abre um link `wa.me` com o texto pronto.
 

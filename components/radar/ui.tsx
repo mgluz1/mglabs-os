@@ -80,3 +80,29 @@ export function ContactIcons({ place }: { place: RadarPlace }) {
     </span>
   );
 }
+
+const RING_COLOR = { quente: "var(--brand)", morno: "#d9a441", frio: "#94a3b8", analisando: "#94a3b8" } as const;
+
+/** Nota em anel (estilo ficha): trilho + arco proporcional à nota, número no centro. Cor e número, nunca só cor. */
+export function ScoreRing({ score, size = 40, stroke }: { score: number | null; size?: number; stroke?: number }) {
+  const band = bandOf(score);
+  const w = stroke ?? Math.max(3, Math.round(size / 11));
+  const r = (size - w) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+  return (
+    <span className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-surface" style={{ width: size, height: size }} title={score == null ? "Analisando o site…" : `Lead Score ${score} (${band})`}>
+      <svg width={size} height={size} className="absolute inset-0 -rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={w} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={RING_COLOR[band]} strokeWidth={w} strokeLinecap="round" strokeDasharray={`${c * pct} ${c}`} />
+      </svg>
+      {score == null ? (
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-transparent" />
+      ) : (
+        <span className="relative font-semibold tabular-nums text-fg" style={{ fontSize: Math.max(11, Math.round(size * 0.3)) }}>
+          {score}
+        </span>
+      )}
+    </span>
+  );
+}

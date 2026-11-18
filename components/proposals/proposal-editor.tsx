@@ -114,7 +114,7 @@ export function ProposalEditor({ proposal: p, items: initialItems, events, servi
         <div className="mb-2 flex items-center justify-between print:hidden"><h2 className="text-sm font-semibold">Pré-visualização</h2><button className="btn btn-ghost btn-sm" onClick={() => window.print()}><Printer className="h-4 w-4" /> Imprimir / salvar PDF</button></div>
         <article className="rounded-xl border border-line bg-white p-8 text-[#18181b] shadow-sm print:border-0 print:shadow-none">
           <header className="flex items-start justify-between border-b border-zinc-200 pb-4">
-            <div><p className="font-heading text-xl font-bold">mglabs<span className="text-[#064e3b]">.</span></p><p className="text-xs text-zinc-500">Design e desenvolvimento · Goiânia/GO</p></div>
+            <div><p className="font-brand text-xl font-bold">mglabs<span className="text-[#064e3b]">.</span></p><p className="text-xs text-zinc-500">Design e desenvolvimento · Goiânia/GO</p></div>
             <div className="text-right text-xs text-zinc-500"><p>Proposta v{p.version}</p>{f.validUntil && <p>Válida até {fmtYmd(f.validUntil)}</p>}</div>
           </header>
           <h1 className="mt-5 font-heading text-2xl font-semibold">{f.title}</h1>
