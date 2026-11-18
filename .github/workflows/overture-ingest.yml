@@ -1,0 +1,44 @@
+name: overture-ingest
+
+# Carrega os lugares do Overture Maps (dados abertos) da região de Goiânia.
+# - Sempre gera o artefato ov_places.jsonl (dá para importar sem secret).
+# - Grava direto no Neon quando o secret DATABASE_URL_UNPOOLED existe.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Release do Overture (vazio = padrão do script)"
+        required: false
+  schedule:
+    - cron: "37 9 25 * *" # todo dia 25, 06:37 em Brasília (releases saem perto do dia 20)
+  push:
+    branches: [feat/osm-overture]
+    paths: [scripts/overture_ingest.py, .github/workflows/overture-ingest.yml]
+
+concurrency: overture-ingest
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OVERTURE_RELEASE: ${{ inputs.release }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install duckdb "psycopg[binary]==3.*"
+      - name: Perfil das categorias
+        run: python scripts/overture_ingest.py profile
+      - name: Exportar lugares
+        run: python scripts/overture_ingest.py export
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ov_places
+          path: ov_places.jsonl
+          retention-days: 7
+      - name: Gravar no Neon
+        if: env.DATABASE_URL != ''
+        run: python scripts/overture_ingest.py load
