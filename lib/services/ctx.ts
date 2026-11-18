@@ -79,9 +79,19 @@ export async function seedWorkspaceDefaults(workspaceId: string) {
   }
 }
 
+// Garante etapas, catálogo e modelos iniciais uma vez por instância (idempotente), inclusive quando o
+// membro foi cadastrado fora do app (ex.: direto no banco) e o primeiro acesso nunca passou por aqui.
+const seeded = new Set<string>();
+
 async function resolveMembership(userId: string, email: string | null) {
   const [m] = await db.select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
-  if (m) return m;
+  if (m) {
+    if (!seeded.has(m.workspaceId)) {
+      await seedWorkspaceDefaults(m.workspaceId);
+      seeded.add(m.workspaceId);
+    }
+    return m;
+  }
   // Primeiro acesso: só vira proprietário se o espaço ainda não tem ninguém
   // (e, se OWNER_EMAIL estiver definido, só esse e-mail). Qualquer outro cadastro fica sem acesso.
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
