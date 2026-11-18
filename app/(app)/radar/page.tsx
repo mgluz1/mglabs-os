@@ -1,23 +1,18 @@
-import { connection } from "next/server";
-import { Suspense } from "react";
-
 import { RadarApp } from "@/components/radar/radar-app";
-import { requireUser } from "@/lib/auth/require";
+import { Gate } from "@/components/shell/gate";
 import { recentSearches } from "@/lib/queries";
+
+export const metadata = { title: "Radar" };
 
 export default function RadarPage({ searchParams }: PageProps<"/radar">) {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-white/50">Carregando o radar…</div>}>
-      <Radar searchParams={searchParams} />
-    </Suspense>
+    <Gate fallback={<div className="p-8 text-sm text-muted">Carregando o radar…</div>}>
+      {async () => {
+        const sp = await searchParams;
+        const busca = typeof sp.busca === "string" && /^[0-9a-f-]{36}$/i.test(sp.busca) ? sp.busca : null;
+        const recent = await recentSearches();
+        return <RadarApp key={busca ?? "novo"} recent={recent} initialSearchId={busca} />;
+      }}
+    </Gate>
   );
-}
-
-async function Radar({ searchParams }: { searchParams: PageProps<"/radar">["searchParams"] }) {
-  await connection();
-  await requireUser();
-  const sp = await searchParams;
-  const busca = typeof sp.busca === "string" && /^[0-9a-f-]{36}$/i.test(sp.busca) ? sp.busca : null;
-  const recent = await recentSearches();
-  return <RadarApp key={busca ?? "novo"} recent={recent} initialSearchId={busca} />;
 }

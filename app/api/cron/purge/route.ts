@@ -20,6 +20,7 @@ export async function GET(req: Request) {
         and google_cached_until < now() - interval '30 days'
         and name is not null
         and id not in (select place_id from leads where place_id is not null)
+        and id not in (select place_id from crm_companies where place_id is not null)
       returning 1
     ) select count(*)::int as n from purged`);
   return Response.json({ purged: rows[0]?.n ?? 0 });

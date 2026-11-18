@@ -25,12 +25,12 @@ export const BAND_COLOR = {
   quente: "#22c55e",
   morno: "#eab308",
   frio: "#64748b",
-  analisando: "#38bdf8",
+  analisando: "#7c9cff",
 } as const;
 
 export const TONE_CLASS: Record<Badge["tone"], string> = {
-  red: "bg-red-500/15 text-red-300 ring-red-500/30",
-  amber: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-  sky: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
-  slate: "bg-slate-500/15 text-slate-300 ring-slate-500/30",
+  red: "bg-danger/15 text-danger ring-danger/30",
+  amber: "bg-warn/15 text-warn ring-warn/30",
+  sky: "bg-info/15 text-info ring-info/30",
+  slate: "bg-muted/15 text-muted ring-muted/30",
 };

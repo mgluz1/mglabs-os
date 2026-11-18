@@ -53,12 +53,12 @@ export function ScoreBadge({ score, size = "md" }: { score: number | null; size?
 }
 
 export function Stars({ rating, count }: { rating: number | null; count: number | null }) {
-  if (rating == null) return <span className="text-white/35">sem avaliações</span>;
+  if (rating == null) return <span className="text-fg/35">sem avaliações</span>;
   return (
     <span className="inline-flex items-center gap-1">
-      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-      <span className="tabular-nums text-white/80">{rating.toFixed(1).replace(".", ",")}</span>
-      <span className="text-white/40">({count ?? 0})</span>
+      <Star className="h-3 w-3 fill-amber-400 text-warn" />
+      <span className="tabular-nums text-fg/80">{rating.toFixed(1).replace(".", ",")}</span>
+      <span className="text-fg/40">({count ?? 0})</span>
     </span>
   );
 }
@@ -67,15 +67,15 @@ export function Stars({ rating, count }: { rating: number | null; count: number 
 export function ContactIcons({ place }: { place: RadarPlace }) {
   const has = (k: string) => place.contacts.some((c) => c.kind === k);
   const items = [
-    { on: has("whatsapp"), icon: MessageCircle, title: "WhatsApp", color: "text-emerald-400" },
-    { on: has("phone") || has("whatsapp"), icon: Phone, title: "Telefone", color: "text-sky-300" },
-    { on: place.siteType === "site_proprio", icon: Globe, title: "Site", color: "text-sky-300" },
-    { on: has("instagram"), icon: AtSign, title: "Instagram", color: "text-pink-300" },
+    { on: has("whatsapp"), icon: MessageCircle, title: "WhatsApp", color: "text-brand" },
+    { on: has("phone") || has("whatsapp"), icon: Phone, title: "Telefone", color: "text-brand" },
+    { on: place.siteType === "site_proprio", icon: Globe, title: "Site", color: "text-brand" },
+    { on: has("instagram"), icon: AtSign, title: "Instagram", color: "text-info" },
   ];
   return (
     <span className="flex items-center gap-1.5">
       {items.map(({ on, icon: Icon, title, color }) => (
-        <Icon key={title} className={`h-3.5 w-3.5 ${on ? color : "text-white/15"}`} aria-label={on ? title : `sem ${title}`} />
+        <Icon key={title} className={`h-3.5 w-3.5 ${on ? color : "text-fg/15"}`} aria-label={on ? title : `sem ${title}`} />
       ))}
     </span>
   );

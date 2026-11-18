@@ -1,18 +1,25 @@
-import type { Metadata } from "next";
-import { GeistMono } from "geist/font/mono";
-import { GeistSans } from "geist/font/sans";
+import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "radarMGLABS",
-  description: "Radar de prospecção da MG Labs",
+  title: { default: "mglabs", template: "%s · mglabs" },
+  description: "MGLABS OS — prospecção, CRM, propostas, projetos e financeiro do estúdio.",
+  icons: { icon: [{ url: "/favicon.ico" }, { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" }], apple: "/brand/apple-touch-icon.png" },
+  robots: { index: false, follow: false },
 };
+export const viewport: Viewport = { themeColor: "#070d14", width: "device-width", initialScale: 1 };
+
+// Aplica o tema salvo antes da hidratação (padrão: escuro) para não piscar.
+const THEME_SCRIPT = `try{var t=localStorage.getItem("mglabs-theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="pt-BR" className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="pt-BR" data-theme="dark" suppressHydrationWarning className="h-full antialiased">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

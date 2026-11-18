@@ -8,6 +8,7 @@ import Map, { AttributionControl, Layer, Marker, NavigationControl, Source, useM
 
 import { BAND_COLOR, bandOf } from "@/components/lead/badges";
 import { offset, type LatLng } from "@/lib/geo";
+import { useTheme } from "@/lib/use-theme";
 import type { RadarPlace } from "@/lib/types";
 
 type Props = {
@@ -22,7 +23,8 @@ type Props = {
 };
 
 // OpenFreeMap: tiles do OpenStreetMap, sem chave e sem limite de uso. Troque com NEXT_PUBLIC_MAP_STYLE.
-const STYLE = process.env.NEXT_PUBLIC_MAP_STYLE || "https://tiles.openfreemap.org/styles/dark";
+const STYLE_DARK = process.env.NEXT_PUBLIC_MAP_STYLE || "https://tiles.openfreemap.org/styles/dark";
+const STYLE_LIGHT = process.env.NEXT_PUBLIC_MAP_STYLE_LIGHT || "https://tiles.openfreemap.org/styles/positron";
 const ATTRIBUTION =
   '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> · Lugares: <a href="https://overturemaps.org" target="_blank">Overture Maps</a>';
 
@@ -37,11 +39,12 @@ function circlePolygon(c: LatLng, radiusM: number, steps = 96): GeoJSON.Feature<
 }
 
 export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPickCenter, onSelect }: Props) {
+  const theme = useTheme();
   const circle = useMemo(() => circlePolygon(center, radiusM), [center, radiusM]);
   return (
     <Map
       initialViewState={{ latitude: center.lat, longitude: center.lng, zoom: 12.5 }}
-      mapStyle={STYLE}
+      mapStyle={theme === "light" ? STYLE_LIGHT : STYLE_DARK}
       attributionControl={false}
       onClick={(e) => onPickCenter({ lat: e.lngLat.lat, lng: e.lngLat.lng })}
       style={{ width: "100%", height: "100%" }}
@@ -52,15 +55,15 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPic
       <AttributionControl position="bottom-right" compact customAttribution={ATTRIBUTION} />
 
       <Source id="raio" type="geojson" data={circle}>
-        <Layer id="raio-fill" type="fill" paint={{ "fill-color": "#38bdf8", "fill-opacity": 0.07 }} />
-        <Layer id="raio-line" type="line" paint={{ "line-color": "#38bdf8", "line-width": 1.5, "line-opacity": 0.9 }} />
+        <Layer id="raio-fill" type="fill" paint={{ "fill-color": "#2bc777", "fill-opacity": 0.07 }} />
+        <Layer id="raio-line" type="line" paint={{ "line-color": "#2bc777", "line-width": 1.5, "line-opacity": 0.9 }} />
       </Source>
 
       <Marker latitude={center.lat} longitude={center.lng} anchor="center" style={{ zIndex: 5 }}>
         <div className="radar-center pointer-events-none">
           <span className="radar-ping" />
           <span className="radar-ping radar-ping-delay" />
-          <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#0b0d12] text-sky-400 shadow-[0_0_0_2px_#38bdf8,0_8px_24px_rgba(56,189,248,.35)]">
+          <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-background text-brand shadow-[0_0_0_2px_#2bc777,0_8px_24px_rgba(43,199,119,.35)]">
             <Radar className="h-[18px] w-[18px]" />
           </span>
         </div>
@@ -83,7 +86,7 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPic
           >
             <button
               title={`${p.name}${p.score != null ? ` · nota ${p.score}` : ""}`}
-              className={`flex items-center justify-center rounded-full font-bold tabular-nums text-[#0b0d12] transition-transform hover:scale-110 ${sel ? "h-9 w-9 scale-110 text-xs" : "h-7 w-7 text-[10px]"}`}
+              className={`flex items-center justify-center rounded-full font-bold tabular-nums text-brand-on transition-transform hover:scale-110 ${sel ? "h-9 w-9 scale-110 text-xs" : "h-7 w-7 text-[10px]"}`}
               style={{ background: color, boxShadow: sel ? `0 0 0 3px #fff, 0 6px 18px ${color}88` : `0 0 0 2px #0b0d12, 0 4px 12px rgba(0,0,0,.5)` }}
             >
               {p.score ?? "…"}

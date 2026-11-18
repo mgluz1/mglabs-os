@@ -77,8 +77,6 @@ run("captura SQL", () => {
     await q.searchResults(SID);
     await q.recentSearches();
     await q.placeById(PID);
-    await q.crmBoard();
-    await q.activitiesFor("00000000-0000-0000-0000-000000000004");
     await quota.placesUsageThisMonth();
     nextRows = [[{ total: 1, release: "x", loaded_at: null }]];
     await search.radarInfo();

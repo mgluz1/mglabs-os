@@ -40,32 +40,13 @@ export type RadarPlace = {
   score: number | null;
   rules: ScoreRule[];
   contacts: Contact[];
+  /** Id da oportunidade no CRM (se houver) e etapa atual. */
   leadId: string | null;
   leadStage: string | null;
+  /** Empresa no CRM ligada a este lugar (se houver). */
+  companyId: string | null;
   /** Pediu para não ser contatado: nenhum botão de contato aparece. */
   optedOut: boolean;
 };
 
 export type Activity = { id: string; kind: string | null; channel: string | null; content: string | null; createdAt: string };
-
-export type LeadCard = {
-  id: string;
-  stage: string;
-  offer: string | null;
-  expectedValue: number | null;
-  nextStep: string | null;
-  nextStepAt: string | null;
-  lostReason: string | null;
-  place: RadarPlace;
-};
-
-export const STAGES = [
-  { id: "novo", label: "Novo" },
-  { id: "abordado", label: "Abordado" },
-  { id: "respondeu", label: "Respondeu" },
-  { id: "reuniao", label: "Reunião" },
-  { id: "proposta", label: "Proposta" },
-  { id: "fechado", label: "Fechado" },
-  { id: "perdido", label: "Perdido" },
-] as const;
-export type StageId = (typeof STAGES)[number]["id"];

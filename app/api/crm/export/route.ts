@@ -1,9 +1,12 @@
 import { connection } from "next/server";
 
-import { requireUser, UnauthorizedError } from "@/lib/auth/require";
 import { getCategory } from "@/lib/config/categories";
-import { crmBoard } from "@/lib/queries";
-import { STAGES } from "@/lib/types";
+import { sourceLabel } from "@/lib/config/crm";
+import { fmtDateTime } from "@/lib/dates";
+import { NoAccessError, requireCtx } from "@/lib/services/ctx";
+import { listDeals } from "@/lib/services/deals";
+import { db } from "@/lib/db";
+import { sql } from "drizzle-orm";
 
 function cell(v: unknown): string {
   const s = v == null ? "" : String(v);
@@ -12,42 +15,23 @@ function cell(v: unknown): string {
   return /[";\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-// Exporta o CRM. Dados próprios + contatos do site da empresa e do Overture; dados do Google ficam de fora.
+// Exporta as oportunidades do espaço de trabalho (CSV, separador ";", UTF-8 com BOM).
 export async function GET() {
   await connection();
+  let ctx: Awaited<ReturnType<typeof requireCtx>>;
   try {
-    await requireUser();
+    ctx = await requireCtx();
   } catch (e) {
-    if (e instanceof UnauthorizedError) return Response.json({ error: e.message }, { status: 401 });
+    if (e instanceof NoAccessError) return Response.json({ error: e.message }, { status: 401 });
     throw e;
   }
-  const leads = await crmBoard();
-  const header = ["Nome", "Categoria", "Bairro", "Cidade", "Etapa", "Oferta", "Valor previsto (R$)", "Próximo passo", "Data do próximo passo", "Lead Score", "WhatsApp (site)", "E-mail (site)", "Instagram (site)", "Motivo da perda", "Fonte", "ID externo"];
-  const lines = leads.map((l) => {
-    const site = l.place.contacts.filter((c) => c.source === "site_empresa" || c.source === "overture");
-    const pick = (k: string) => site.filter((c) => c.kind === k).map((c) => c.value).join(" ");
-    return [
-      l.place.name,
-      getCategory(l.place.category ?? "")?.label ?? l.place.category,
-      l.place.neighborhood,
-      l.place.city,
-      STAGES.find((s) => s.id === l.stage)?.label ?? l.stage,
-      l.offer,
-      l.expectedValue,
-      l.nextStep,
-      l.nextStepAt ? new Date(l.nextStepAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "",
-      l.place.score,
-      pick("whatsapp"),
-      pick("email"),
-      pick("instagram"),
-      l.lostReason,
-      l.place.source === "overture" ? "Overture Maps" : "Google",
-      l.place.overtureId ?? l.place.googlePlaceId,
-    ].map(cell).join(";");
-  });
+  const deals = await listDeals(ctx, { limit: 1000 });
+  const stages = new Map((await db.execute<{ key: string; label: string }>(sql`select key, label from crm_stages where workspace_id = ${ctx.workspaceId}`)).rows.map((r) => [r.key, r.label]));
+  const header = ["Oportunidade", "Empresa", "Categoria", "Cidade", "Etapa", "Serviço", "Valor previsto (R$)", "Probabilidade (%)", "Origem", "Próximo passo", "Prazo", "Lead Score", "Motivo da perda", "Contato principal", "Criada em"];
+  const lines = deals.map((d) =>
+    [d.title, d.companyName, getCategory(d.category ?? "")?.label ?? d.category, d.city, stages.get(d.stageKey) ?? d.stageKey, d.serviceType, d.valueCents == null ? "" : (d.valueCents / 100).toFixed(2).replace(".", ","), d.probability, sourceLabel(d.source), d.nextStep, d.nextStepAt ? fmtDateTime(d.nextStepAt) : "", d.score, d.lostReason, d.contactName, fmtDateTime(d.createdAt)].map(cell).join(";"),
+  );
   const csv = "﻿" + [header.map(cell).join(";"), ...lines].join("\r\n");
   const date = new Date().toISOString().slice(0, 10);
-  return new Response(csv, {
-    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="crm-radar-${date}.csv"` },
-  });
+  return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="mglabs-oportunidades-${date}.csv"` } });
 }

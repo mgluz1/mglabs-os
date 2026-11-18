@@ -1,29 +1,217 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/space-grotesk";
 
-/* Tema escuro fixo (ferramenta interna MG Labs). */
-:root {
-  --background: #0b0d12;
-  --foreground: #e6e8ee;
+/*
+ * MGLABS OS — tokens de design (docs/DESIGN-SYSTEM-MGLABS-OS.md).
+ * Escuro (padrão): paleta do portfólio miguelluz. Claro: paleta da landing mglabs.
+ * Verde = cor de ação. Status sempre com texto/ícone, nunca só cor.
+ */
+:root,
+:root[data-theme="dark"] {
+  --background: #070d14;
+  --surface: #0e1620;
+  --elevated: #15202c;
+  --foreground: #e8eef3;
+  --muted: #9fb0c0;
+  --line: #233140;
+  --brand: #38d385;
+  --brand-hover: #2bc777;
+  --brand-on: #02412d;
+  --danger: #ff8a7a;
+  --warn: #f0c25a;
+  --info: #7cb4ff;
+  --ok: #38d385;
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --elevated: #f9f9fb;
+  --foreground: #18181b;
+  --muted: #5f5f6b;
+  --line: #e2e4e9;
+  --brand: #064e3b;
+  --brand-hover: #047857;
+  --brand-on: #ffffff;
+  --danger: #b42318;
+  --warn: #9a5b00;
+  --info: #1d4ed8;
+  --ok: #047857;
+  color-scheme: light;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-fg: var(--foreground);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-on: var(--brand-on);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-info: var(--info);
+  --color-ok: var(--ok);
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-heading: "Space Grotesk Variable", "Inter Variable", sans-serif;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+}
+
+html {
+  background: var(--background);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
 }
 
-input,
-select,
-textarea {
-  color-scheme: dark;
+h1,
+h2,
+h3,
+.font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+/* Foco visível e consistente (teclado) */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Barras de rolagem discretas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+
+/* ---------- Primitivos de UI ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s, transform 0.15s;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-on);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+.btn-ghost {
+  border: 1px solid var(--line);
+  color: var(--foreground);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.btn-danger {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.btn-sm {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
+}
+
+.input {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input::placeholder {
+  color: color-mix(in srgb, var(--foreground) 35%, transparent);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
+}
+select.input {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239fb0c0' stroke-width='2.5'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  padding-right: 2rem;
+}
+textarea.input {
+  resize: vertical;
+  min-height: 5rem;
+  line-height: 1.5;
+}
+
+.card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+}
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--foreground) 6%, transparent), color-mix(in srgb, var(--foreground) 12%, transparent), color-mix(in srgb, var(--foreground) 6%, transparent));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.slide-in {
+  animation: slide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* Centro da busca no mapa: pulso de radar */
@@ -38,7 +226,7 @@ textarea {
   height: 36px;
   width: 36px;
   border-radius: 9999px;
-  border: 2px solid #38bdf8;
+  border: 2px solid #2bc777;
   animation: radar-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 .radar-ping-delay {
@@ -55,7 +243,7 @@ textarea {
   }
 }
 .radar-sweep {
-  background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.22), transparent 25%);
+  background: conic-gradient(from 0deg, rgba(43, 199, 119, 0.22), transparent 25%);
   animation: radar-spin 4s linear infinite;
 }
 @keyframes radar-spin {
@@ -63,9 +251,17 @@ textarea {
     transform: rotate(360deg);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
   .radar-ping,
   .radar-sweep {
-    animation: none;
+    animation: none !important;
   }
 }
