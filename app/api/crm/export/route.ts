@@ -12,7 +12,7 @@ function cell(v: unknown): string {
   return /[";\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-// Exporta o CRM. Só dados próprios + contatos do site da empresa; dados do Google ficam de fora.
+// Exporta o CRM. Dados próprios + contatos do site da empresa e do Overture; dados do Google ficam de fora.
 export async function GET() {
   await connection();
   try {
@@ -22,9 +22,9 @@ export async function GET() {
     throw e;
   }
   const leads = await crmBoard();
-  const header = ["Nome", "Categoria", "Bairro", "Cidade", "Etapa", "Oferta", "Valor previsto (R$)", "Próximo passo", "Data do próximo passo", "Lead Score", "WhatsApp (site)", "E-mail (site)", "Instagram (site)", "Motivo da perda", "Google place_id"];
+  const header = ["Nome", "Categoria", "Bairro", "Cidade", "Etapa", "Oferta", "Valor previsto (R$)", "Próximo passo", "Data do próximo passo", "Lead Score", "WhatsApp (site)", "E-mail (site)", "Instagram (site)", "Motivo da perda", "Fonte", "ID externo"];
   const lines = leads.map((l) => {
-    const site = l.place.contacts.filter((c) => c.source === "site_empresa");
+    const site = l.place.contacts.filter((c) => c.source === "site_empresa" || c.source === "overture");
     const pick = (k: string) => site.filter((c) => c.kind === k).map((c) => c.value).join(" ");
     return [
       l.place.name,
@@ -41,7 +41,8 @@ export async function GET() {
       pick("email"),
       pick("instagram"),
       l.lostReason,
-      l.place.googlePlaceId,
+      l.place.source === "overture" ? "Overture Maps" : "Google",
+      l.place.overtureId ?? l.place.googlePlaceId,
     ].map(cell).join(";");
   });
   const csv = "﻿" + [header.map(cell).join(";"), ...lines].join("\r\n");

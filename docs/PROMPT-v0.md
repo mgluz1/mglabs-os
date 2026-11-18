@@ -1,5 +1,7 @@
 # Prompt — Radar de Leads v0 (versão provisória)
 
+> **Atualização v0.2 (nov/2026):** o Google Maps e a Places API foram substituídos por OpenStreetMap (OpenFreeMap + MapLibre) e pela base aberta Overture Maps. As seções sobre Google abaixo são históricas; veja o README.
+
 > Cole este prompt inteiro no Claude Code, numa pasta vazia. Ele descreve a primeira versão do meu app de prospecção: radar no mapa + contatos + Lead Score + mensagem com IA + mini-CRM. Prioridade: **funcionar rápido e com segurança, não ficar bonito**.
 
 ---

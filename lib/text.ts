@@ -37,3 +37,13 @@ export function nameSimilarity(a: string, b: string): number {
   for (const n of B.values()) total += n;
   return total === 0 ? 0 : (2 * inter) / total;
 }
+
+/** "R. 9, 330 - St. Oeste, Goiânia - GO" → "St. Oeste" (melhor esforço; o Overture não traz bairro separado). */
+export function neighborhoodFrom(address: string | null): string | null {
+  if (!address) return null;
+  const parts = address.split(" - ").map((p) => p.trim());
+  if (parts.length < 2) return null;
+  const cand = parts[1].split(",")[0].trim();
+  if (!cand || /^\d/.test(cand) || /^(GO|Goiás)$/i.test(cand)) return null;
+  return cand.length <= 40 ? cand : null;
+}

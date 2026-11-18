@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { db } from "@/lib/db";
 
 // Cron diário: apaga campos do Google vencidos há mais de 30 dias de lugares fora do CRM.
+// Lugares do Overture (dados abertos) não são afetados.
 // Mantém place_id (permitido guardar), contatos do site da empresa e dados próprios.
 export async function GET(req: Request) {
   await connection();
@@ -15,7 +16,8 @@ export async function GET(req: Request) {
     with purged as (
       update places set name = null, address = null, rating = null, rating_count = null, business_status = null,
         google_phone = null, google_website = null, google_maps_uri = null, primary_type = null, geom = null
-      where google_cached_until < now() - interval '30 days'
+      where coalesce(source, 'google') = 'google'
+        and google_cached_until < now() - interval '30 days'
         and name is not null
         and id not in (select place_id from leads where place_id is not null)
       returning 1

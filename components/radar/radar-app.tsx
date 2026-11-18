@@ -13,7 +13,7 @@ import type { LatLng } from "@/lib/geo";
 import type { RadarPlace } from "@/lib/types";
 
 type Recent = { id: string; category: string; radius_m: number; label: string | null; results: number; created_at: string | Date };
-type Quota = { cells: number; used: number; cap: number; remaining: number };
+type Info = { total: number; release: string | null };
 type Filter = "todos" | "quentes" | "sem_site" | "abordaveis";
 type SearchMeta = { lat: number; lng: number; radius_m: number; category: string; label?: string | null };
 type Results = { places: RadarPlace[]; pending: number; search: SearchMeta | null };
@@ -52,7 +52,7 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
   const [mode, setMode] = useState<"busca" | "resultados">(demo?.mode ?? (initialSearchId ? "resultados" : "busca"));
   const [selectedId, setSelectedId] = useState<string | null>(demo?.selectedId ?? null);
   const [message, setMessage] = useState<string | null>(null);
-  const [quota, setQuota] = useState<Quota | null>(null);
+  const [info, setInfo] = useState<Info | null>(null);
   const [filter, setFilter] = useState<Filter>("todos");
   const [searching, startSearch] = useTransition();
   const processing = useRef(false);
@@ -72,15 +72,17 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
   const city = CITIES.find((c) => c.id === cityId);
   const placeLabel = city?.label ?? "ponto no mapa";
 
-  // estimativa de cota para o raio atual
+  // tamanho e release da base aberta
   useEffect(() => {
     if (demo) return;
-    const t = setTimeout(async () => {
-      const r = await fetch(`/api/quota?radius=${radiusKm * 1000}`);
-      if (r.ok) setQuota(await r.json());
-    }, 250);
-    return () => clearTimeout(t);
-  }, [radiusKm, searchId, demo]);
+    let alive = true;
+    fetch("/api/radar/info")
+      .then((r) => (r.ok ? (r.json() as Promise<Info>) : null))
+      .then((j) => alive && j && setInfo(j));
+    return () => {
+      alive = false;
+    };
+  }, [demo]);
 
   const loadResults = useCallback(async (id: string): Promise<Results | undefined> => {
     const r = await fetch(`/api/radar/${id}`, { cache: "no-store" });
@@ -142,8 +144,8 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
       const d = out.discarded;
       const removed = d.franquia + d.fechado + d.duplicado;
       setMessage(
-        `${out.calls} chamadas ao Google${out.partial ? " — busca parcial: limite do mês atingido" : ""}` +
-          (removed ? ` · ${removed} removidos (${d.franquia} franquias, ${d.fechado} fechados, ${d.duplicado} duplicados)` : ""),
+        (out.partial ? "Muitos resultados: mostrando os 600 mais perto do centro. " : "") +
+          (removed ? `${removed} removidos (${d.franquia} redes/franquias, ${d.duplicado} duplicados).` : ""),
       );
       setSearchId(out.searchId);
       setSearchLabel(label);
@@ -366,7 +368,13 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
               {searching ? "Varrendo o mapa…" : `Buscar ${cat?.plural ?? ""} ${city ? `em ${city.label}` : "em volta do ponto"}`}
             </button>
             <p className="text-center text-[11px] text-white/40">
-              {quota ? `~${quota.cells} chamadas ao Google · ${quota.used} de ${quota.cap} usadas no mês` : "Calculando o custo da busca…"}
+              {demo
+                ? "Modo demonstração"
+                : info
+                  ? info.total > 0
+                    ? `Busca grátis · ${info.total.toLocaleString("pt-BR")} negócios na base aberta (Overture ${info.release ?? ""})`
+                    : "A base aberta ainda está vazia: rode a carga do Overture"
+                  : "Carregando a base…"}
             </p>
           </footer>
         )}
@@ -509,7 +517,7 @@ function ResultsView(props: {
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-white/45">{p.neighborhood ?? p.address}</span>
                 <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                  <Stars rating={p.rating} count={p.ratingCount} />
+                  {p.rating != null && <Stars rating={p.rating} count={p.ratingCount} />}
                   {badgesFor(p).map((b) => (
                     <span key={b.label} className={`rounded-md px-1.5 py-px text-[10px] font-medium ring-1 ${TONE_CLASS[b.tone]}`}>
                       {b.label}
@@ -524,7 +532,7 @@ function ResultsView(props: {
         ))}
         {places.length === 0 && <li className="p-6 text-center text-sm text-white/40">Nenhum negócio neste filtro.</li>}
       </ul>
-      <p className="border-t border-white/10 px-5 py-2 text-[10px] text-white/30">Dados de lugares: Google</p>
+      <p className="border-t border-white/10 px-5 py-2 text-[10px] text-white/30">Lugares: Overture Maps (dados abertos) · Mapa: © OpenStreetMap</p>
     </div>
   );
 }

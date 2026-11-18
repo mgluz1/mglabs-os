@@ -1,5 +1,5 @@
 // Pesos do Lead Score (0–100). Ajuste aqui e mude WEIGHTS_VERSION.
-export const WEIGHTS_VERSION = "v1";
+export const WEIGHTS_VERSION = "v2";
 
 export const WEIGHTS = {
   A: {
@@ -22,6 +22,10 @@ export const WEIGHTS = {
     avaliacoes10: 4,
     nota45: 5,
     nota40: 3,
+    // sem Google (dados do Overture)
+    confianca90: 12,
+    confianca75: 7,
+    variasFontes: 6,
   },
   C: {
     max: 20,

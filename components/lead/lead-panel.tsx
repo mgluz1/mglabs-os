@@ -30,7 +30,7 @@ const TONES = [
   ["formal", "Formal"],
 ] as const;
 
-const SOURCE_LABEL: Record<Contact["source"], string> = { site_empresa: "site da empresa", google_places: "Google", manual: "manual" };
+const SOURCE_LABEL: Record<Contact["source"], string> = { site_empresa: "site da empresa", google_places: "Google", overture: "Overture (dados abertos)", manual: "manual" };
 const KIND_LABEL: Record<Contact["kind"], string> = {
   whatsapp: "WhatsApp",
   phone: "Telefone",
@@ -162,12 +162,19 @@ export function LeadPanel({
               </p>
               <p className="truncate text-xs text-white/35">{place.address}</p>
               <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                <Stars rating={place.rating} count={place.ratingCount} />
-                {place.googleMapsUri && (
-                  <a href={place.googleMapsUri} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
-                    Google Maps <ExternalLink className="h-3 w-3" />
-                  </a>
+                {place.rating != null ? (
+                  <Stars rating={place.rating} count={place.ratingCount} />
+                ) : (
+                  place.confidence != null && <span className="text-white/45">confiança {Math.round(place.confidence * 100)}%</span>
                 )}
+                <a
+                  href={`https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}#map=19/${place.lat}/${place.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 text-sky-400 hover:underline"
+                >
+                  Ver no mapa <ExternalLink className="h-3 w-3" />
+                </a>
                 {place.leadStage && (
                   <span className="rounded-md bg-violet-500/15 px-1.5 py-px text-[11px] text-violet-300 ring-1 ring-violet-500/30">
                     CRM: {STAGES.find((s) => s.id === place.leadStage)?.label ?? place.leadStage}

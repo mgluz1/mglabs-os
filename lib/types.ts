@@ -4,13 +4,18 @@ import type { ScoreRule } from "@/lib/score";
 export type Contact = {
   kind: "whatsapp" | "phone" | "email" | "instagram" | "facebook" | "site";
   value: string;
-  source: "site_empresa" | "google_places" | "manual";
+  source: "site_empresa" | "google_places" | "overture" | "manual";
   confirmed: boolean;
 };
 
 export type RadarPlace = {
   id: string;
-  googlePlaceId: string;
+  /** "overture" (dados abertos) ou "google" (buscas antigas). */
+  source: "overture" | "google";
+  overtureId: string | null;
+  googlePlaceId: string | null;
+  confidence: number | null;
+  sourceCount: number | null;
   name: string;
   category: string | null;
   address: string | null;

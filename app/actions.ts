@@ -9,9 +9,7 @@ import { requireUser } from "@/lib/auth/require";
 import { getCategory } from "@/lib/config/categories";
 import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
-import { placeDetails } from "@/lib/places/google";
 import { runSearch, type SearchOutcome } from "@/lib/places/search";
-import { reserveCalls } from "@/lib/quota";
 import { activitiesFor, placeById } from "@/lib/queries";
 import { STAGES, type Activity, type RadarPlace, type StageId } from "@/lib/types";
 
@@ -47,31 +45,12 @@ export async function searchAction(input: {
 export async function leadDetailAction(placeId: string): Promise<Result<{ place: RadarPlace; activities: Activity[] }>> {
   try {
     await requireUser();
-    await refreshGoogleIfExpired(placeId);
     const place = await placeById(placeId);
     if (!place) return { ok: false, error: "Lugar não encontrado." };
     return { ok: true, data: { place, activities: place.leadId ? await activitiesFor(place.leadId) : [] } };
   } catch (e) {
     return fail(e);
   }
-}
-
-/** Cache do Google vencido → atualiza com Place Details (conta na cota). */
-async function refreshGoogleIfExpired(placeId: string) {
-  const { rows } = await db.execute<{ google_place_id: string; expired: boolean }>(
-    sql`select google_place_id, (google_cached_until is null or google_cached_until < now()) as expired from places where id = ${placeId}`,
-  );
-  const r = rows[0];
-  if (!r?.expired || !process.env.GOOGLE_PLACES_API_KEY) return;
-  if (!(await reserveCalls("places:details"))) return;
-  const p = await placeDetails(r.google_place_id);
-  await db.execute(sql`
-    update places set name = ${p.displayName?.text ?? null}, address = ${p.shortFormattedAddress ?? p.formattedAddress ?? null},
-      rating = ${p.rating ?? null}, rating_count = ${p.userRatingCount ?? null}, business_status = ${p.businessStatus ?? null},
-      google_phone = ${p.internationalPhoneNumber ?? p.nationalPhoneNumber ?? null}, google_website = ${p.websiteUri ?? null},
-      google_maps_uri = ${p.googleMapsUri ?? null}, google_cached_until = now() + interval '30 days',
-      geom = coalesce(${p.location ? `SRID=4326;POINT(${p.location.longitude} ${p.location.latitude})` : null}::geography, geom)
-    where id = ${placeId}`);
 }
 
 function signalsFor(place: RadarPlace): string[] {
@@ -166,8 +145,9 @@ export async function optOutAction(placeId: string, reason: string): Promise<Res
     const gp = parseBrPhone(place.googlePhone);
     if (gp) phones.add(gp.e164);
     if (place.googlePhone) phones.add(place.googlePhone);
-    await db.execute(sql`insert into optouts (google_place_id, phone, reason) values (${place.googlePlaceId}, null, ${reason || null})`);
-    for (const ph of phones) await db.execute(sql`insert into optouts (google_place_id, phone, reason) values (${place.googlePlaceId}, ${ph}, ${reason || null})`);
+    await db.execute(sql`insert into optouts (google_place_id, overture_id, phone, reason) values (${place.googlePlaceId}, ${place.overtureId}, null, ${reason || null})`);
+    for (const ph of phones)
+      await db.execute(sql`insert into optouts (google_place_id, overture_id, phone, reason) values (${place.googlePlaceId}, ${place.overtureId}, ${ph}, ${reason || null})`);
     if (place.leadId) {
       await db.execute(sql`update leads set stage = 'perdido', lost_reason = 'Pediu para não ser contatado', next_step = null, next_step_at = null, updated_at = now() where id = ${place.leadId}`);
       await db.execute(sql`insert into activities (lead_id, kind, content) values (${place.leadId}, 'optout', ${reason || "Pediu para não ser contatado"})`);
@@ -230,4 +210,17 @@ export async function addActivityAction(leadId: string, kind: "nota" | "ligacao"
 
 export async function ensureOptOutLine(text: string): Promise<string> {
   return withOptOut(text);
+}
+
+// ---------- Base aberta (Overture) ----------
+
+export async function importOvertureAction(): Promise<Result<{ release: string; rows: number; removed: number; ms: number }>> {
+  try {
+    await requireUser();
+    const { importOverture } = await import("@/lib/overture/import");
+    const r = await importOverture();
+    return r.ok ? { ok: true, data: { release: r.release, rows: r.rows, removed: r.removed, ms: r.ms } } : { ok: false, error: r.error };
+  } catch (e) {
+    return fail(e);
+  }
 }

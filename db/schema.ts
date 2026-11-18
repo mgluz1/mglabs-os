@@ -150,6 +150,7 @@ export const optouts = pgTable("optouts", {
   id: uuid("id").primaryKey().defaultRandom(),
   phone: text("phone"),
   googlePlaceId: text("google_place_id"),
+  overtureId: text("overture_id"),
   reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
