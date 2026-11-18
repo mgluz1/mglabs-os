@@ -3,13 +3,15 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { Radar } from "lucide-react";
+import { setWorkerUrl, type StyleSpecification } from "maplibre-gl";
 import { useEffect, useMemo } from "react";
 import Map, { AttributionControl, Layer, Marker, NavigationControl, Source, useMap } from "react-map-gl/maplibre";
 
-import { BAND_COLOR, bandOf } from "@/components/lead/badges";
+import { bandOf } from "@/components/lead/badges";
+import { CATEGORY_ICON } from "@/components/radar/ui";
 import { offset, type LatLng } from "@/lib/geo";
-import { useTheme } from "@/lib/use-theme";
 import type { RadarPlace } from "@/lib/types";
+import { useTheme } from "@/lib/use-theme";
 
 type Props = {
   center: LatLng;
@@ -18,17 +20,49 @@ type Props = {
   radiusM: number;
   places: RadarPlace[];
   selectedId: string | null;
+  category?: string;
+  /** Desloca o centro visual para a direita quando o painel cobre a esquerda do mapa (px). */
+  leftInset?: number;
+  /** Celular: atribuição recolhida e sem botões de zoom (gesto de pinça). */
+  compact?: boolean;
   onPickCenter: (c: LatLng) => void;
   onSelect: (id: string) => void;
 };
 
-// OpenFreeMap: tiles do OpenStreetMap, sem chave e sem limite de uso. Troque com NEXT_PUBLIC_MAP_STYLE.
-const STYLE_DARK = process.env.NEXT_PUBLIC_MAP_STYLE || "https://tiles.openfreemap.org/styles/dark";
-const STYLE_LIGHT = process.env.NEXT_PUBLIC_MAP_STYLE_LIGHT || "https://tiles.openfreemap.org/styles/positron";
+/**
+ * Mapa padrão do OpenStreetMap (o mesmo de openstreetmap.org), em tiles raster.
+ * Uso leve e com atribuição, conforme a política de tiles da OSMF. Para trocar de servidor de tiles
+ * (ex.: um provedor pago se o volume crescer), defina NEXT_PUBLIC_MAP_TILES; para um estilo vetorial
+ * MapLibre completo, NEXT_PUBLIC_MAP_STYLE.
+ */
+const TILES = process.env.NEXT_PUBLIC_MAP_TILES || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const VECTOR_STYLE = process.env.NEXT_PUBLIC_MAP_STYLE;
 const ATTRIBUTION =
-  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> · Lugares: <a href="https://overturemaps.org" target="_blank">Overture Maps</a>';
+  '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">Colaboradores do OpenStreetMap</a> · Lugares: <a href="https://overturemaps.org" target="_blank" rel="noreferrer">Overture Maps</a>';
 
-function circlePolygon(c: LatLng, radiusM: number, steps = 96): GeoJSON.Feature<GeoJSON.Polygon> {
+// Worker servido de /public/maplibre (scripts/copy-maplibre-worker.mjs roda no predev/prebuild).
+if (typeof window !== "undefined") setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+
+function osmStyle(dark: boolean): StyleSpecification {
+  return {
+    version: 8,
+    sources: { osm: { type: "raster", tiles: [TILES], tileSize: 256, maxzoom: 19 } },
+    layers: [
+      { id: "fundo", type: "background", paint: { "background-color": dark ? "#0e1620" : "#f2efe9" } },
+      {
+        id: "osm",
+        type: "raster",
+        source: "osm",
+        // no tema escuro o mapa claro é atenuado, sem inverter as cores (ruas continuam legíveis)
+        paint: dark ? { "raster-brightness-max": 0.5, "raster-saturation": -0.55, "raster-contrast": 0.1 } : { "raster-saturation": -0.08 },
+      },
+    ],
+  };
+}
+
+const RING = { quente: "#0b5a3e", morno: "#d9a441", frio: "#94a3b8", analisando: "#94a3b8" } as const;
+
+function circlePolygon(c: LatLng, radiusM: number, steps = 128): GeoJSON.Feature<GeoJSON.Polygon> {
   const coords: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const a = (i / steps) * 2 * Math.PI;
@@ -38,39 +72,40 @@ function circlePolygon(c: LatLng, radiusM: number, steps = 96): GeoJSON.Feature<
   return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } };
 }
 
-export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPickCenter, onSelect }: Props) {
+export function RadarMap({ center, panTarget, radiusM, places, selectedId, category, leftInset = 0, compact = false, onPickCenter, onSelect }: Props) {
   const theme = useTheme();
+  const dark = theme === "dark";
+  const style = useMemo(() => VECTOR_STYLE ?? osmStyle(dark), [dark]);
   const circle = useMemo(() => circlePolygon(center, radiusM), [center, radiusM]);
+  const CenterIcon = (category && CATEGORY_ICON[category]) || Radar;
+  const line = dark ? "#38d385" : "#0b5a3e";
+
   return (
     <Map
       initialViewState={{ latitude: center.lat, longitude: center.lng, zoom: 12.5 }}
-      mapStyle={theme === "light" ? STYLE_LIGHT : STYLE_DARK}
+      mapStyle={style}
       attributionControl={false}
       onClick={(e) => onPickCenter({ lat: e.lngLat.lat, lng: e.lngLat.lng })}
       style={{ width: "100%", height: "100%" }}
       cursor="crosshair"
     >
-      <FlyTo center={panTarget} radiusM={radiusM} />
-      <NavigationControl position="bottom-right" showCompass={false} />
-      <AttributionControl position="bottom-right" compact customAttribution={ATTRIBUTION} />
+      <FlyTo center={panTarget} radiusM={radiusM} leftInset={leftInset} />
+      {!compact && <NavigationControl position="bottom-right" showCompass={false} />}
+      <AttributionControl position={compact ? "top-right" : "bottom-right"} compact={compact} customAttribution={ATTRIBUTION} />
 
       <Source id="raio" type="geojson" data={circle}>
-        <Layer id="raio-fill" type="fill" paint={{ "fill-color": "#2bc777", "fill-opacity": 0.07 }} />
-        <Layer id="raio-line" type="line" paint={{ "line-color": "#2bc777", "line-width": 1.5, "line-opacity": 0.9 }} />
+        <Layer id="raio-fill" type="fill" paint={{ "fill-color": line, "fill-opacity": dark ? 0.1 : 0.07 }} />
+        <Layer id="raio-line" type="line" paint={{ "line-color": line, "line-width": 2.5, "line-opacity": 0.95 }} />
       </Source>
 
       <Marker latitude={center.lat} longitude={center.lng} anchor="center" style={{ zIndex: 5 }}>
-        <div className="radar-center pointer-events-none">
-          <span className="radar-ping" />
-          <span className="radar-ping radar-ping-delay" />
-          <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-background text-brand shadow-[0_0_0_2px_#2bc777,0_8px_24px_rgba(43,199,119,.35)]">
-            <Radar className="h-[18px] w-[18px]" />
-          </span>
-        </div>
+        <span className="pointer-events-none flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#0b5a3e] shadow-[0_6px_20px_rgba(15,31,23,.28)] ring-4 ring-white/60">
+          <CenterIcon className="h-5 w-5" aria-hidden />
+        </span>
       </Marker>
 
       {places.map((p) => {
-        const color = BAND_COLOR[bandOf(p.score)];
+        const band = bandOf(p.score);
         const sel = p.id === selectedId;
         return (
           <Marker
@@ -78,19 +113,29 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPic
             latitude={p.lat}
             longitude={p.lng}
             anchor="center"
-            style={{ zIndex: sel ? 4 : 2 }}
+            style={{ zIndex: sel ? 6 : band === "quente" ? 3 : 2 }}
             onClick={(e) => {
               e.originalEvent.stopPropagation();
               onSelect(p.id);
             }}
           >
-            <button
-              title={`${p.name}${p.score != null ? ` · nota ${p.score}` : ""}`}
-              className={`flex items-center justify-center rounded-full font-bold tabular-nums text-brand-on transition-transform hover:scale-110 ${sel ? "h-9 w-9 scale-110 text-xs" : "h-7 w-7 text-[10px]"}`}
-              style={{ background: color, boxShadow: sel ? `0 0 0 3px #fff, 0 6px 18px ${color}88` : `0 0 0 2px #0b0d12, 0 4px 12px rgba(0,0,0,.5)` }}
-            >
-              {p.score ?? "…"}
-            </button>
+            <span className="relative flex items-center">
+              <button
+                type="button"
+                title={`${p.name}${p.score != null ? ` · nota ${p.score}` : " · analisando"}`}
+                aria-label={`${p.name}${p.score != null ? `, nota ${p.score}` : ""}`}
+                className={`flex items-center justify-center rounded-full font-semibold tabular-nums shadow-[0_2px_8px_rgba(15,31,23,.25)] transition-transform hover:scale-110 ${sel ? "h-10 w-10 scale-110 text-[13px] text-white" : "h-[34px] w-[34px] bg-white text-[12px] text-[#0f1f17]"}`}
+                style={{
+                  background: sel ? RING[band] : "#fff",
+                  border: `3px ${band === "analisando" ? "dashed" : "solid"} ${sel ? "#fff" : RING[band]}`,
+                }}
+              >
+                {p.score ?? "…"}
+              </button>
+              {sel && (
+                <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-full bg-[#14231b]/90 px-3 py-1 text-xs font-medium text-white shadow-lg">{p.name}</span>
+              )}
+            </span>
           </Marker>
         );
       })}
@@ -98,14 +143,21 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, onPic
   );
 }
 
-/** Move o mapa quando o centro muda (troca de cidade, busca aberta) e ajusta o zoom ao raio. */
-function FlyTo({ center, radiusM }: { center: LatLng; radiusM: number }) {
+/** Move o mapa quando o centro muda (troca de cidade, busca aberta) e enquadra o raio inteiro. */
+function FlyTo({ center, radiusM, leftInset }: { center: LatLng; radiusM: number; leftInset: number }) {
   const { current: map } = useMap();
   useEffect(() => {
     if (!map) return;
-    const zoom = Math.max(10, Math.min(15, 15.6 - Math.log2(radiusM / 400)));
-    map.flyTo({ center: [center.lng, center.lat], zoom, duration: 900 });
-    // o zoom segue o raio só quando o centro muda, para não brigar com o zoom manual
+    const ne = offset(center, radiusM * 1.08, radiusM * 1.08);
+    const sw = offset(center, -radiusM * 1.08, -radiusM * 1.08);
+    map.fitBounds(
+      [
+        [sw.lng, sw.lat],
+        [ne.lng, ne.lat],
+      ],
+      { padding: { top: 70, bottom: 40, left: leftInset + 40, right: 40 }, duration: 900, maxZoom: 16 },
+    );
+    // o enquadramento segue o raio só quando o centro muda, para não brigar com o zoom manual
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, center]);
   return null;

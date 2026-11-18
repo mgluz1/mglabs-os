@@ -69,7 +69,7 @@ export function DashboardView({ data, days, basePath = "/dashboard" }: { data: D
                   ].map(([l, v, h]) => (
                     <div key={l as string}>
                       <dt className="text-xs text-muted">{l}</dt>
-                      <dd className="font-heading text-xl font-semibold tabular-nums">{brl(v as number, { compact: true })}</dd>
+                      <dd className="font-heading text-[22px] tabular-nums">{brl(v as number, { compact: true })}</dd>
                       <dd className="text-xs text-muted">{h}</dd>
                     </div>
                   ))}

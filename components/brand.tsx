@@ -10,7 +10,7 @@ export function Brand({ compact = false, subtitle = true }: { compact?: boolean;
       <BrandMark size={compact ? 32 : 34} />
       {!compact && (
         <span className="leading-tight">
-          <span className="block font-heading text-[18px] font-bold tracking-tight">
+          <span className="block font-brand text-[18px] font-bold tracking-tight">
             mglabs<span className="text-brand">.</span>
           </span>
           {subtitle && <span className="block text-[10.5px] uppercase tracking-[0.14em] text-muted">OS · operação</span>}

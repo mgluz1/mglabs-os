@@ -8,14 +8,14 @@ export const metadata: Metadata = {
   icons: { icon: [{ url: "/favicon.ico" }, { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" }], apple: "/brand/apple-touch-icon.png" },
   robots: { index: false, follow: false },
 };
-export const viewport: Viewport = { themeColor: "#070d14", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#f4f5ef", width: "device-width", initialScale: 1 };
 
-// Aplica o tema salvo antes da hidratação (padrão: escuro) para não piscar.
-const THEME_SCRIPT = `try{var t=localStorage.getItem("mglabs-theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}`;
+// Aplica o tema salvo antes da hidratação (padrão: claro) para não piscar.
+const THEME_SCRIPT = `try{var t=localStorage.getItem("mglabs-theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){document.documentElement.dataset.theme="light"}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="pt-BR" data-theme="dark" suppressHydrationWarning className="h-full antialiased">
+    <html lang="pt-BR" data-theme="light" suppressHydrationWarning className="h-full antialiased">
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
