@@ -6,6 +6,8 @@ export type CategoryId = "barbearia" | "academia" | "restaurante" | "clinica" | 
 export type Category = {
   id: CategoryId;
   label: string;
+  /** Plural em minúsculas, para frases ("12 barbearias no radar"). */
+  plural: string;
   types: string[];
   coreTypes: string[];
   /** Vive de agenda: sem agendamento online vira oportunidade. */
@@ -13,10 +15,11 @@ export type Category = {
 };
 
 export const CATEGORIES: Category[] = [
-  { id: "barbearia", label: "Barbearia", types: ["barber_shop"], coreTypes: ["barber_shop"], agenda: true },
-  { id: "academia", label: "Academia", types: ["gym", "fitness_center"], coreTypes: ["gym"], agenda: true },
+  { id: "barbearia", plural: "barbearias", label: "Barbearia", types: ["barber_shop"], coreTypes: ["barber_shop"], agenda: true },
+  { id: "academia", plural: "academias", label: "Academia", types: ["gym", "fitness_center"], coreTypes: ["gym"], agenda: true },
   {
     id: "restaurante",
+    plural: "restaurantes",
     label: "Restaurante",
     types: ["restaurant", "pizza_restaurant", "brazilian_restaurant", "hamburger_restaurant"],
     coreTypes: ["restaurant"],
@@ -24,6 +27,7 @@ export const CATEGORIES: Category[] = [
   },
   {
     id: "clinica",
+    plural: "clínicas",
     label: "Clínica",
     types: ["dentist", "dental_clinic", "doctor", "physiotherapist", "skin_care_clinic", "medical_clinic"],
     coreTypes: ["dentist", "dental_clinic", "doctor", "physiotherapist"],
@@ -31,6 +35,7 @@ export const CATEGORIES: Category[] = [
   },
   {
     id: "salao",
+    plural: "salões de beleza",
     label: "Salão de beleza",
     types: ["hair_salon", "beauty_salon", "nail_salon", "hair_care", "beautician"],
     coreTypes: ["hair_salon", "beauty_salon", "nail_salon"],

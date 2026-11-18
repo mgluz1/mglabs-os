@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth/server";
 export default auth.middleware({
   loginUrl: "/auth/sign-in",
   // o cron se autentica com CRON_SECRET, não com sessão
-  publicRoutes: ["/api/cron"],
+  publicRoutes: ["/api/cron", "/dev-preview"], // dev-preview só existe em desenvolvimento (notFound em produção)
 });
 
 export const config = {
