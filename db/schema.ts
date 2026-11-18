@@ -69,7 +69,9 @@ export const placeContacts = pgTable(
 
 export const siteAudits = pgTable("site_audits", {
   id: uuid("id").primaryKey().defaultRandom(),
-  placeId: uuid("place_id").references(() => places.id, { onDelete: "cascade" }),
+  placeId: uuid("place_id")
+    .unique()
+    .references(() => places.id, { onDelete: "cascade" }),
   url: text("url"),
   siteType: text("site_type"),
   https: boolean("https"),
@@ -82,6 +84,7 @@ export const siteAudits = pgTable("site_audits", {
   signals: jsonb("signals"),
   status: text("status").default("pending"),
   error: text("error"),
+  approachable: boolean("approachable"),
   auditedAt: timestamp("audited_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -104,6 +107,9 @@ export const searches = pgTable("searches", {
   category: text("category"),
   center: geographyPoint("center"),
   radiusM: integer("radius_m"),
+  label: text("label"),
+  status: text("status").default("done"),
+  error: text("error"),
   apiCalls: integer("api_calls"),
   results: integer("results"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -149,4 +155,18 @@ export const apiUsage = pgTable(
     calls: integer("calls").default(0),
   },
   (t) => [primaryKey({ columns: [t.month, t.endpoint] })],
+);
+
+// Quais lugares cada busca trouxe (a tela do radar lista por busca).
+export const searchResults = pgTable(
+  "search_results",
+  {
+    searchId: uuid("search_id")
+      .notNull()
+      .references(() => searches.id, { onDelete: "cascade" }),
+    placeId: uuid("place_id")
+      .notNull()
+      .references(() => places.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.searchId, t.placeId] })],
 );

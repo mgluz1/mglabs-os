@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
+/* Tema escuro fixo (ferramenta interna MG Labs). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0b0d12;
+  --foreground: #e6e8ee;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -12,15 +14,58 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+input,
+select,
+textarea {
+  color-scheme: dark;
+}
+
+/* Centro da busca no mapa: pulso de radar */
+.radar-center {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.radar-ping {
+  position: absolute;
+  height: 36px;
+  width: 36px;
+  border-radius: 9999px;
+  border: 2px solid #38bdf8;
+  animation: radar-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.radar-ping-delay {
+  animation-delay: 1.2s;
+}
+@keyframes radar-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+.radar-sweep {
+  background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.22), transparent 25%);
+  animation: radar-spin 4s linear infinite;
+}
+@keyframes radar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .radar-ping,
+  .radar-sweep {
+    animation: none;
+  }
 }
