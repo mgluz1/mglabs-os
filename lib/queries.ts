@@ -4,7 +4,7 @@ import { sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
-import type { Activity, Contact, LeadCard, RadarPlace } from "@/lib/types";
+import type { Contact, RadarPlace } from "@/lib/types";
 
 type Row = {
   id: string;
@@ -41,11 +41,13 @@ type Row = {
   contacts: Contact[] | null;
   lead_id: string | null;
   lead_stage: string | null;
+  company_id: string | null;
   opted_out: boolean;
 };
 
-// Base: lugar + análise + nota + contatos do site + lead + opt-out.
-const BASE = sql`
+// Base: lugar + análise + nota + contatos do site + negócio no CRM + opt-out.
+// `ws` escopa a ligação com o CRM ao espaço de trabalho (lugares e notas são dados abertos compartilhados).
+const base = (ws: string | null) => sql`
   select p.id, p.source, p.overture_id, p.google_place_id, p.website, p.phone, p.confidence::text as confidence, p.source_count, p.name, p.category, p.address, p.neighborhood, p.city,
          ST_Y(p.geom::geometry) as lat, ST_X(p.geom::geometry) as lng,
          p.rating::text as rating, p.rating_count, p.google_phone, p.google_website, p.google_maps_uri,
@@ -55,7 +57,7 @@ const BASE = sql`
          (select coalesce(jsonb_agg(jsonb_build_object('kind', c.kind, 'value', c.value, 'source', c.source, 'confirmed', c.confirmed)
                  order by c.confirmed desc, c.kind), '[]'::jsonb)
             from place_contacts c where c.place_id = p.id) as contacts,
-         l.id as lead_id, l.stage as lead_stage,
+         l.deal_id as lead_id, l.stage_key as lead_stage, l.company_id,
          exists(select 1 from optouts o
                 where o.google_place_id = p.google_place_id
                    or o.overture_id = p.overture_id
@@ -64,7 +66,15 @@ const BASE = sql`
   from places p
   left join site_audits a on a.place_id = p.id
   left join lead_scores s on s.place_id = p.id
-  left join leads l on l.place_id = p.id`;
+  left join lateral (
+    select d.id as deal_id, st.key as stage_key, c.id as company_id
+    from crm_companies c
+    left join crm_deals d on d.company_id = c.id
+    left join crm_stages st on st.id = d.stage_id
+    where ${ws ? sql`c.workspace_id = ${ws} and` : sql`false and`} c.place_id = p.id
+    order by (st.kind = 'open') desc nulls last, d.updated_at desc nulls last
+    limit 1
+  ) l on true`;
 
 function toPlace(r: Row): RadarPlace {
   const contacts: Contact[] = [...(r.contacts ?? [])];
@@ -112,17 +122,18 @@ function toPlace(r: Row): RadarPlace {
     contacts,
     leadId: r.lead_id,
     leadStage: r.lead_stage,
+    companyId: r.company_id,
     optedOut: r.opted_out,
   };
 }
 
-async function list(where: SQL, opts: { includeOptedOut?: boolean } = {}): Promise<RadarPlace[]> {
-  const { rows } = await db.execute<Row>(sql`${BASE} ${where} order by s.total desc nulls last, p.name`);
+async function list(ws: string | null, where: SQL, opts: { includeOptedOut?: boolean } = {}): Promise<RadarPlace[]> {
+  const { rows } = await db.execute<Row>(sql`${base(ws)} ${where} order by s.total desc nulls last, p.name`);
   return rows.filter((r) => r.lat != null && (opts.includeOptedOut || !r.opted_out)).map(toPlace);
 }
 
-export async function searchResults(searchId: string) {
-  const places = await list(sql`where p.id in (select place_id from search_results where search_id = ${searchId})`);
+export async function searchResults(searchId: string, ws: string | null = null) {
+  const places = await list(ws, sql`where p.id in (select place_id from search_results where search_id = ${searchId})`);
   const { rows } = await db.execute<{
     id: string;
     category: string;
@@ -147,34 +158,7 @@ export async function recentSearches(limit = 8) {
   return rows;
 }
 
-export async function placeById(placeId: string): Promise<RadarPlace | null> {
-  const r = await list(sql`where p.id = ${placeId}`, { includeOptedOut: true });
+export async function placeById(placeId: string, ws: string | null = null): Promise<RadarPlace | null> {
+  const r = await list(ws, sql`where p.id = ${placeId}`, { includeOptedOut: true });
   return r[0] ?? null;
-}
-
-export async function activitiesFor(leadId: string): Promise<Activity[]> {
-  const { rows } = await db.execute<{ id: string; kind: string | null; channel: string | null; content: string | null; created_at: string }>(
-    sql`select id, kind, channel, content, created_at from activities where lead_id = ${leadId} order by created_at desc limit 100`,
-  );
-  return rows.map((r) => ({ id: r.id, kind: r.kind, channel: r.channel, content: r.content, createdAt: new Date(r.created_at).toISOString() }));
-}
-
-export async function crmBoard(): Promise<LeadCard[]> {
-  const { rows } = await db.execute<
-    Row & { l_offer: string | null; l_value: string | null; l_next_step: string | null; l_next_at: string | null; l_lost: string | null }
-  >(sql`
-    select b.*, l.offer as l_offer, l.expected_value::text as l_value, l.next_step as l_next_step,
-           l.next_step_at as l_next_at, l.lost_reason as l_lost
-    from (${BASE}) b join leads l on l.id = b.lead_id
-    order by l.next_step_at asc nulls last, l.updated_at desc`);
-  return rows.map((r) => ({
-    id: r.lead_id!,
-    stage: r.lead_stage ?? "novo",
-    offer: r.l_offer,
-    expectedValue: r.l_value == null ? null : Number(r.l_value),
-    nextStep: r.l_next_step,
-    nextStepAt: r.l_next_at ? new Date(r.l_next_at).toISOString() : null,
-    lostReason: r.l_lost,
-    place: toPlace(r),
-  }));
 }

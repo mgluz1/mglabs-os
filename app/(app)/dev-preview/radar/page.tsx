@@ -42,6 +42,7 @@ const base = {
   oldSite: [] as string[],
   leadId: null,
   leadStage: null,
+  companyId: null,
   optedOut: false,
   googleWebsite: null,
 };

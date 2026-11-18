@@ -21,12 +21,12 @@ export function ImportOvertureButton() {
             router.refresh();
           })
         }
-        className="inline-flex items-center gap-2 rounded-xl bg-white/[0.05] px-3 py-2 text-sm ring-1 ring-white/10 hover:bg-white/[0.09] disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-xl bg-fg/[0.05] px-3 py-2 text-sm ring-1 ring-fg/10 hover:bg-fg/[0.09] disabled:opacity-50"
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         {pending ? "Importando…" : "Atualizar base agora"}
       </button>
-      {msg && <p className="text-xs text-white/60">{msg}</p>}
+      {msg && <p className="text-xs text-fg/60">{msg}</p>}
     </div>
   );
 }

@@ -3,224 +3,82 @@
 import { sql } from "drizzle-orm";
 import { after } from "next/server";
 
-import { generateMessage, OFFERS, TONES, withOptOut, type OfferId, type ToneId } from "@/lib/ai/message";
+import { act } from "@/lib/actions/helpers";
 import { processAuditBatch } from "@/lib/audit/process";
-import { requireUser } from "@/lib/auth/require";
-import { getCategory } from "@/lib/config/categories";
 import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
 import { runSearch, type SearchOutcome } from "@/lib/places/search";
-import { activitiesFor, placeById } from "@/lib/queries";
-import { STAGES, type Activity, type RadarPlace, type StageId } from "@/lib/types";
+import { placeById } from "@/lib/queries";
+import { timelineFor } from "@/lib/services/activities";
+import { requireCtx } from "@/lib/services/ctx";
+import { addPlaceToCrm } from "@/lib/services/deals";
+import { registerOptOut } from "@/lib/services/optout";
+import type { Activity, RadarPlace } from "@/lib/types";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
-function fail(e: unknown): { ok: false; error: string } {
-  console.error(e);
-  return { ok: false, error: e instanceof Error ? e.message : "Erro inesperado" };
-}
+// ---------- Radar (descoberta) ----------
 
-// ---------- Radar ----------
-
-export async function searchAction(input: {
-  category: string;
-  lat: number;
-  lng: number;
-  radiusM: number;
-  label?: string;
-}): Promise<SearchOutcome> {
+export async function searchAction(input: { category: string; lat: number; lng: number; radiusM: number; label?: string }): Promise<SearchOutcome> {
   try {
-    await requireUser();
+    await requireCtx();
     if (![input.lat, input.lng, input.radiusM].every(Number.isFinite)) return { ok: false, error: "Centro ou raio inválido." };
     const out = await runSearch({ category: input.category, center: { lat: input.lat, lng: input.lng }, radiusM: input.radiusM, label: input.label });
     if (out.ok) after(() => processAuditBatch(5).catch((e) => console.error("audit", e)));
     return out;
   } catch (e) {
-    return fail(e);
+    console.error("search", e instanceof Error ? e.message : e);
+    return { ok: false, error: e instanceof Error && e.message.length < 200 ? e.message : "Não foi possível buscar agora." };
   }
 }
 
-// ---------- Painel do lead ----------
-
+/** Painel do lugar: dados do Radar + histórico da oportunidade no CRM (se já foi adicionado). */
 export async function leadDetailAction(placeId: string): Promise<Result<{ place: RadarPlace; activities: Activity[] }>> {
-  try {
-    await requireUser();
-    const place = await placeById(placeId);
-    if (!place) return { ok: false, error: "Lugar não encontrado." };
-    return { ok: true, data: { place, activities: place.leadId ? await activitiesFor(place.leadId) : [] } };
-  } catch (e) {
-    return fail(e);
-  }
+  return act(async (ctx) => {
+    const place = await placeById(placeId, ctx.workspaceId);
+    if (!place) throw new Error("Lugar não encontrado.");
+    const tl = place.leadId ? await timelineFor(ctx, { dealId: place.leadId }, 30) : [];
+    return { place, activities: tl.map((a) => ({ id: a.id, kind: a.kind, channel: a.channel, content: a.content, createdAt: a.occurredAt.toISOString() })) };
+  }).then((r) => (r.ok ? r : { ok: false as const, error: r.error === "Algo deu errado. Tente novamente em instantes." ? "Lugar não encontrado." : r.error }));
 }
 
-function signalsFor(place: RadarPlace): string[] {
-  const out: string[] = [];
-  if (place.siteType === "sem_site") out.push("não tem site próprio");
-  if (place.siteType === "so_rede_social") out.push("usa só Instagram/WhatsApp como site");
-  if (place.viewport === false) out.push("o site não se adapta ao celular");
-  if (place.psiPerformance != null && place.psiPerformance < 50) out.push("o site demora para abrir no celular");
-  if (place.hasServicesPage === false) out.push("o site não mostra a lista de serviços");
-  const cat = place.category ? getCategory(place.category) : null;
-  if (cat?.agenda && place.hasBooking === false) out.push("o agendamento parece ser só pelo WhatsApp/telefone");
-  if (cat?.agenda && place.hasBooking == null && place.siteType !== "site_proprio") out.push("não há agendamento online");
-  if (place.ratingCount && place.ratingCount >= 30 && (place.rating ?? 0) >= 4.5)
-    out.push(`tem ótima avaliação no Google (${place.rating?.toFixed(1)} com ${place.ratingCount} avaliações)`);
-  for (const o of place.oldSite) out.push(`site com sinais de desatualizado (${o})`);
-  return out.slice(0, 4);
+/** Botão "Escrever mensagem": garante empresa + oportunidade no CRM e devolve os ids para abrir o Estúdio. */
+export async function openInStudioAction(placeId: string): Promise<Result<{ companyId: string; dealId: string }>> {
+  return act(async (ctx) => {
+    const r = await addPlaceToCrm(ctx, placeId);
+    return { companyId: r.companyId, dealId: r.dealId };
+  });
 }
 
-export async function generateMessageAction(placeId: string, offer: OfferId, tone: ToneId): Promise<Result<string>> {
-  try {
-    await requireUser();
-    if (!(offer in OFFERS) || !(tone in TONES)) return { ok: false, error: "Oferta ou tom inválido." };
-    const place = await placeById(placeId);
-    if (!place) return { ok: false, error: "Lugar não encontrado." };
-    if (place.optedOut) return { ok: false, error: "Este negócio pediu para não ser contatado." };
-    const text = await generateMessage({
-      name: place.name,
-      category: getCategory(place.category ?? "")?.label ?? place.category ?? "negócio",
-      neighborhood: place.neighborhood,
-      city: place.city,
-      signals: signalsFor(place),
-      offer,
-      tone,
-      myName: process.env.MEU_NOME || "Miguel",
-    });
-    return { ok: true, data: text };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-async function ensureLead(placeId: string, stage: StageId = "novo"): Promise<string> {
-  const { rows } = await db.execute<{ id: string }>(sql`
-    insert into leads (place_id, stage) values (${placeId}, ${stage})
-    on conflict (place_id) do update set updated_at = now()
-    returning id`);
-  return rows[0].id;
-}
-
-export async function addToCrmAction(placeIds: string[]): Promise<Result<number>> {
-  try {
-    await requireUser();
-    let n = 0;
-    for (const id of placeIds.slice(0, 200)) {
-      const place = await placeById(id);
-      if (!place || place.optedOut) continue;
-      await ensureLead(id);
-      n++;
-    }
-    return { ok: true, data: n };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-/** Registrado depois que EU confirmo que enviei pelo meu WhatsApp. */
-export async function markSentAction(placeId: string, channel: "whatsapp" | "ligacao" | "email" | "instagram", text: string): Promise<Result<string>> {
-  try {
-    await requireUser();
-    const place = await placeById(placeId);
-    if (!place) return { ok: false, error: "Lugar não encontrado." };
-    if (place.optedOut) return { ok: false, error: "Este negócio pediu para não ser contatado." };
-    const leadId = await ensureLead(placeId);
-    await db.execute(sql`
-      update leads set stage = case when stage = 'novo' then 'abordado' else stage end,
-        next_step = 'Follow-up da primeira mensagem', next_step_at = now() + interval '3 days', updated_at = now()
-      where id = ${leadId}`);
-    await db.execute(sql`insert into activities (lead_id, kind, channel, content) values (${leadId}, 'mensagem_enviada', ${channel}, ${text.slice(0, 4000)})`);
-    return { ok: true, data: leadId };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
+/** "Não contatar mais" a partir do Radar. Vale para o lugar mesmo que ainda não esteja no CRM. */
 export async function optOutAction(placeId: string, reason: string): Promise<Result<true>> {
-  try {
-    await requireUser();
-    const place = await placeById(placeId);
-    if (!place) return { ok: false, error: "Lugar não encontrado." };
+  return act(async (ctx) => {
+    const place = await placeById(placeId, ctx.workspaceId);
+    if (!place) throw new Error("Lugar não encontrado.");
+    if (place.companyId) {
+      await registerOptOut(ctx, { companyId: place.companyId, reason });
+      return true as const;
+    }
     const phones = new Set<string>();
-    for (const c of place.contacts) if (c.kind === "whatsapp" || c.kind === "phone") phones.add(c.value);
+    for (const c of place.contacts) if (c.kind === "whatsapp" || c.kind === "phone") phones.add(parseBrPhone(c.value)?.e164 ?? c.value);
     const gp = parseBrPhone(place.googlePhone);
     if (gp) phones.add(gp.e164);
-    if (place.googlePhone) phones.add(place.googlePhone);
     await db.execute(sql`insert into optouts (google_place_id, overture_id, phone, reason) values (${place.googlePlaceId}, ${place.overtureId}, null, ${reason || null})`);
-    for (const ph of phones)
-      await db.execute(sql`insert into optouts (google_place_id, overture_id, phone, reason) values (${place.googlePlaceId}, ${place.overtureId}, ${ph}, ${reason || null})`);
-    if (place.leadId) {
-      await db.execute(sql`update leads set stage = 'perdido', lost_reason = 'Pediu para não ser contatado', next_step = null, next_step_at = null, updated_at = now() where id = ${place.leadId}`);
-      await db.execute(sql`insert into activities (lead_id, kind, content) values (${place.leadId}, 'optout', ${reason || "Pediu para não ser contatado"})`);
-    }
-    return { ok: true, data: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-// ---------- CRM ----------
-
-export async function moveStageAction(leadId: string, stage: StageId, lostReason?: string): Promise<Result<true>> {
-  try {
-    await requireUser();
-    if (!STAGES.some((s) => s.id === stage)) return { ok: false, error: "Etapa inválida." };
-    await db.execute(sql`
-      update leads set stage = ${stage}, lost_reason = ${stage === "perdido" ? (lostReason ?? null) : null}, updated_at = now()
-      where id = ${leadId}`);
-    await db.execute(sql`insert into activities (lead_id, kind, content) values (${leadId}, 'etapa', ${`Movido para ${STAGES.find((s) => s.id === stage)!.label}${lostReason ? ` — ${lostReason}` : ""}`})`);
-    return { ok: true, data: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function updateLeadAction(
-  leadId: string,
-  patch: { offer?: string | null; expectedValue?: number | null; nextStep?: string | null; nextStepAt?: string | null },
-): Promise<Result<true>> {
-  try {
-    await requireUser();
-    const at = patch.nextStepAt ? new Date(patch.nextStepAt) : null;
-    if (at && Number.isNaN(at.getTime())) return { ok: false, error: "Data inválida." };
-    await db.execute(sql`
-      update leads set
-        offer = coalesce(${patch.offer ?? null}, offer),
-        expected_value = ${patch.expectedValue === undefined ? sql`expected_value` : patch.expectedValue},
-        next_step = ${patch.nextStep === undefined ? sql`next_step` : patch.nextStep},
-        next_step_at = ${patch.nextStepAt === undefined ? sql`next_step_at` : at?.toISOString() ?? null},
-        updated_at = now()
-      where id = ${leadId}`);
-    return { ok: true, data: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function addActivityAction(leadId: string, kind: "nota" | "ligacao" | "resposta", content: string): Promise<Result<true>> {
-  try {
-    await requireUser();
-    if (!content.trim()) return { ok: false, error: "Escreva algo." };
-    await db.execute(sql`insert into activities (lead_id, kind, content) values (${leadId}, ${kind}, ${content.slice(0, 4000)})`);
-    if (kind === "resposta") await db.execute(sql`update leads set stage = case when stage in ('novo','abordado') then 'respondeu' else stage end, updated_at = now() where id = ${leadId}`);
-    return { ok: true, data: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function ensureOptOutLine(text: string): Promise<string> {
-  return withOptOut(text);
+    for (const ph of phones) await db.execute(sql`insert into optouts (google_place_id, overture_id, phone, reason) values (${place.googlePlaceId}, ${place.overtureId}, ${ph}, ${reason || null})`);
+    return true as const;
+  });
 }
 
 // ---------- Base aberta (Overture) ----------
 
 export async function importOvertureAction(): Promise<Result<{ release: string; rows: number; removed: number; ms: number }>> {
   try {
-    await requireUser();
+    await requireCtx();
     const { importOverture } = await import("@/lib/overture/import");
     const r = await importOverture();
     return r.ok ? { ok: true, data: { release: r.release, rows: r.rows, removed: r.removed, ms: r.ms } } : { ok: false, error: r.error };
   } catch (e) {
-    return fail(e);
+    console.error("overture", e instanceof Error ? e.message : e);
+    return { ok: false, error: "Falha ao atualizar a base aberta." };
   }
 }

@@ -3,7 +3,8 @@
 import { ArrowLeft, Crosshair, Flame, History, Loader2, MapPin, Radar, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-import { addToCrmAction, searchAction } from "@/app/actions";
+import { searchAction } from "@/app/actions";
+import { addPlaceToCrmAction } from "@/lib/actions/crm";
 import { badgesFor, TONE_CLASS } from "@/components/lead/badges";
 import { LeadPanel } from "@/components/lead/lead-panel";
 import { RadarMap } from "@/components/radar/radar-map";
@@ -197,19 +198,19 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
 
       {/* rótulo da busca no topo */}
       <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2">
-        <div className="flex items-center gap-2 rounded-full bg-[#0b0d12]/85 px-4 py-2 text-sm font-medium shadow-lg ring-1 ring-white/10 backdrop-blur">
-          <Radar className="h-4 w-4 text-sky-400" />
+        <div className="flex items-center gap-2 rounded-full bg-background/85 px-4 py-2 text-sm font-medium shadow-lg ring-1 ring-fg/10 backdrop-blur">
+          <Radar className="h-4 w-4 text-brand" />
           {mode === "resultados" && searchLabel ? searchLabel : `${cat?.label ?? ""} · ${placeLabel} · ${radiusKm} km`}
         </div>
       </div>
 
       {/* painel flutuante */}
-      <aside className="absolute bottom-4 left-4 top-4 z-20 flex w-[400px] flex-col overflow-hidden rounded-2xl bg-[#0f1219]/92 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
+      <aside className="absolute bottom-4 left-4 top-4 z-20 flex w-[400px] flex-col overflow-hidden rounded-2xl bg-surface/92 shadow-2xl ring-1 ring-fg/10 backdrop-blur-xl">
         {mode === "busca" ? (
           <div className="flex-1 space-y-5 overflow-y-auto p-5">
             <header>
               <h1 className="text-2xl font-semibold tracking-tight">Radar de clientes</h1>
-              <p className="mt-1 text-sm text-white/50">Ache negócios no mapa, veja quem precisa de você e chame no WhatsApp.</p>
+              <p className="mt-1 text-sm text-fg/50">Ache negócios no mapa, veja quem precisa de você e chame no WhatsApp.</p>
             </header>
 
             <section>
@@ -224,11 +225,11 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                         setOffer(o.id);
                         writeLocal(OFFER_KEY, o.id);
                       }}
-                      className={`rounded-xl p-3 text-left transition ${on ? "bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20" : "bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.07]"}`}
+                      className={`rounded-xl p-3 text-left transition ${on ? "bg-brand text-brand-on " : "bg-fg/[0.04] ring-1 ring-fg/10 hover:bg-fg/[0.07]"}`}
                     >
-                      <o.icon className={`mb-2 h-5 w-5 ${on ? "text-white" : "text-sky-400"}`} />
+                      <o.icon className={`mb-2 h-5 w-5 ${on ? "text-brand-on" : "text-brand"}`} />
                       <div className="text-sm font-semibold leading-tight">{o.label}</div>
-                      <div className={`mt-0.5 text-[11px] leading-snug ${on ? "text-white/80" : "text-white/45"}`}>{o.hint}</div>
+                      <div className={`mt-0.5 text-[11px] leading-snug ${on ? "text-brand-on/75" : "text-fg/45"}`}>{o.hint}</div>
                     </button>
                   );
                 })}
@@ -245,7 +246,7 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                     <button
                       key={c.id}
                       onClick={() => setCategory(c.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition ${on ? "bg-sky-500 font-medium text-[#0b0d12]" : "bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.08]"}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition ${on ? "bg-brand font-medium text-brand-on" : "bg-fg/[0.04] ring-1 ring-fg/10 hover:bg-fg/[0.08]"}`}
                     >
                       {Icon && <Icon className="h-3.5 w-3.5" />}
                       {c.label}
@@ -257,8 +258,8 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
 
             <section>
               <Label>Onde</Label>
-              <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 ring-1 ring-white/10 focus-within:ring-sky-500/60">
-                <MapPin className="h-4 w-4 shrink-0 text-sky-400" />
+              <div className="flex items-center gap-2 rounded-xl bg-fg/[0.04] px-3 ring-1 ring-fg/10 focus-within:ring-brand/60">
+                <MapPin className="h-4 w-4 shrink-0 text-brand" />
                 <select
                   value={cityId}
                   onChange={(e) => {
@@ -272,16 +273,16 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                   className="w-full bg-transparent py-2.5 text-sm outline-none"
                 >
                   {CITIES.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-[#0f1219]">
+                    <option key={c.id} value={c.id} className="bg-surface">
                       {c.label}, GO
                     </option>
                   ))}
-                  <option value="mapa" className="bg-[#0f1219]">
+                  <option value="mapa" className="bg-surface">
                     Ponto escolhido no mapa
                   </option>
                 </select>
               </div>
-              <p className="mt-1.5 flex items-center gap-1 text-xs text-white/40">
+              <p className="mt-1.5 flex items-center gap-1 text-xs text-fg/40">
                 <Crosshair className="h-3 w-3" /> ou clique no mapa para mover o centro
               </p>
             </section>
@@ -298,10 +299,10 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                 step={0.5}
                 value={radiusKm}
                 onChange={(e) => setRadiusKm(Number(e.target.value))}
-                className="w-full accent-sky-500"
+                className="w-full accent-brand"
                 aria-label="Raio da busca em km"
               />
-              <div className="flex justify-between text-[11px] text-white/35">
+              <div className="flex justify-between text-[11px] text-fg/35">
                 <span>1 km</span>
                 <span>15 km</span>
               </div>
@@ -315,9 +316,9 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
                 </Label>
                 <div className="space-y-1">
                   {recent.slice(0, 4).map((r) => (
-                    <a key={r.id} href={`/radar?busca=${r.id}`} className="flex justify-between rounded-lg px-2 py-1.5 text-sm text-white/70 hover:bg-white/5 hover:text-white">
+                    <a key={r.id} href={`/radar?busca=${r.id}`} className="flex justify-between rounded-lg px-2 py-1.5 text-sm text-fg/70 hover:bg-fg/5 hover:text-fg">
                       <span className="truncate">{r.label ?? r.category}</span>
-                      <span className="shrink-0 text-white/40">{r.results}</span>
+                      <span className="shrink-0 text-fg/40">{r.results}</span>
                     </a>
                   ))}
                 </div>
@@ -345,8 +346,8 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
             hotCount={hotNotInCrm.length}
             onAddHot={async () => {
               if (demo) return;
-              const r = await addToCrmAction(hotNotInCrm.map((p) => p.id));
-              setMessage(r.ok ? `${r.data} leads quentes adicionados ao CRM.` : r.error);
+              const r = await addPlaceToCrmAction(hotNotInCrm.map((p) => p.id));
+              setMessage(r.ok ? `${r.data.created} leads quentes adicionados ao CRM${r.data.existing ? ` (${r.data.existing} já estavam)` : ""}.` : r.error);
               if (searchId) await loadResults(searchId);
             }}
             onBack={() => {
@@ -357,17 +358,17 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
         )}
 
         {mode === "busca" && (
-          <footer className="space-y-2 border-t border-white/10 bg-[#0f1219] p-4">
-            {message && <p className="text-xs text-red-300">{message}</p>}
+          <footer className="space-y-2 border-t border-fg/10 bg-surface p-4">
+            {message && <p className="text-xs text-danger">{message}</p>}
             <button
               onClick={runSearch}
               disabled={searching || !!demo}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 py-3 font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 font-semibold text-brand-on  transition hover:brightness-110 disabled:opacity-60"
             >
               {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {searching ? "Varrendo o mapa…" : `Buscar ${cat?.plural ?? ""} ${city ? `em ${city.label}` : "em volta do ponto"}`}
             </button>
-            <p className="text-center text-[11px] text-white/40">
+            <p className="text-center text-[11px] text-fg/40">
               {demo
                 ? "Modo demonstração"
                 : info
@@ -382,8 +383,8 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
 
       {/* painel do lead */}
       {selectedId && (
-        <div className="absolute bottom-4 right-4 top-4 z-30 w-[420px] overflow-hidden rounded-2xl shadow-2xl ring-1 ring-white/10">
-          <LeadPanel key={selectedId} placeId={selectedId} defaultOffer={offer} demo={demo?.places.find((p) => p.id === selectedId)} onClose={() => setSelectedId(null)} onChanged={() => searchId && !demo && loadResults(searchId)} />
+        <div className="absolute bottom-4 right-4 top-4 z-30 w-[420px] overflow-hidden rounded-2xl shadow-2xl ring-1 ring-fg/10">
+          <LeadPanel key={selectedId} placeId={selectedId} demo={demo?.places.find((p) => p.id === selectedId)} onClose={() => setSelectedId(null)} onChanged={() => searchId && !demo && loadResults(searchId)} />
         </div>
       )}
     </div>
@@ -391,7 +392,7 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
 }
 
 function Label({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`mb-2 text-xs font-medium uppercase tracking-wide text-white/45 ${className}`}>{children}</div>;
+  return <div className={`mb-2 text-xs font-medium uppercase tracking-wide text-fg/45 ${className}`}>{children}</div>;
 }
 
 function ResultsView(props: {
@@ -424,21 +425,21 @@ function ResultsView(props: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="space-y-3 border-b border-white/10 p-5">
-        <button onClick={props.onBack} className="inline-flex items-center gap-1 text-xs text-white/50 hover:text-white">
+      <header className="space-y-3 border-b border-fg/10 p-5">
+        <button onClick={props.onBack} className="inline-flex items-center gap-1 text-xs text-fg/50 hover:text-fg">
           <ArrowLeft className="h-3.5 w-3.5" /> Nova busca
         </button>
         <div>
           <h2 className="text-xl font-semibold tracking-tight">
             {total} {total === 1 ? "negócio" : props.categoryPlural} no radar
           </h2>
-          <p className="text-sm text-white/50">
+          <p className="text-sm text-fg/50">
             {stats.semSite} sem site próprio · {stats.quentes} quentes
           </p>
         </div>
 
-        <div className="rounded-xl bg-gradient-to-br from-emerald-500/15 to-emerald-500/[0.03] p-3.5 ring-1 ring-emerald-500/25">
-          <div className="text-2xl font-bold tracking-tight text-emerald-300">{brl.format(stats.oportunidades * ticket)} em potencial</div>
+        <div className="rounded-xl bg-gradient-to-br from-brand/15 to-brand/[0.03] p-3.5 ring-1 ring-brand/25">
+          <div className="text-2xl font-bold tracking-tight text-brand">{brl.format(stats.oportunidades * ticket)} em potencial</div>
           <div className="mt-0.5 text-xs text-emerald-100/60">
             {stats.oportunidades} oportunidades com contato ×{" "}
             {editingTicket ? (
@@ -454,7 +455,7 @@ function ResultsView(props: {
                   setEditingTicket(false);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                className="w-20 rounded bg-black/30 px-1 text-emerald-100 outline-none ring-1 ring-emerald-500/40"
+                className="w-20 rounded bg-black/30 px-1 text-emerald-100 outline-none ring-1 ring-brand/40"
               />
             ) : (
               <button onClick={() => setEditingTicket(true)} className="underline decoration-dotted underline-offset-2 hover:text-emerald-100" title="Clique para mudar o seu ticket médio">
@@ -467,7 +468,7 @@ function ResultsView(props: {
 
         {pending > 0 && (
           <div>
-            <div className="mb-1 flex justify-between text-[11px] text-sky-300">
+            <div className="mb-1 flex justify-between text-[11px] text-brand">
               <span className="inline-flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Analisando sites e notas
               </span>
@@ -475,8 +476,8 @@ function ResultsView(props: {
                 {analyzed}/{total}
               </span>
             </div>
-            <div className="h-1 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-sky-400 transition-all" style={{ width: `${pct}%` }} />
+            <div className="h-1 overflow-hidden rounded-full bg-fg/10">
+              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
             </div>
           </div>
         )}
@@ -486,14 +487,14 @@ function ResultsView(props: {
             <button
               key={v}
               onClick={() => props.onFilter(v)}
-              className={`rounded-full px-2.5 py-1 text-xs transition ${props.filter === v ? "bg-white text-[#0b0d12]" : "bg-white/[0.05] text-white/60 hover:text-white"}`}
+              className={`rounded-full px-2.5 py-1 text-xs transition ${props.filter === v ? "bg-brand text-brand-on" : "bg-fg/[0.05] text-fg/60 hover:text-fg"}`}
             >
               {l}
               {n != null && <span className="ml-1 tabular-nums opacity-60">{n}</span>}
             </button>
           ))}
         </div>
-        {props.message && <p className="text-[11px] text-white/45">{props.message}</p>}
+        {props.message && <p className="text-[11px] text-fg/45">{props.message}</p>}
       </header>
 
       {props.hotCount > 0 && (
@@ -507,7 +508,7 @@ function ResultsView(props: {
           <li key={p.id}>
             <button
               onClick={() => props.onSelect(p.id)}
-              className={`flex w-full gap-3 rounded-xl p-3 text-left transition ${props.selectedId === p.id ? "bg-sky-500/10 ring-1 ring-sky-500/40" : "hover:bg-white/[0.04]"}`}
+              className={`flex w-full gap-3 rounded-xl p-3 text-left transition ${props.selectedId === p.id ? "bg-brand/10 ring-1 ring-brand/40" : "hover:bg-fg/[0.04]"}`}
             >
               <ScoreBadge score={p.score} />
               <span className="min-w-0 flex-1">
@@ -515,7 +516,7 @@ function ResultsView(props: {
                   <span className="truncate text-sm font-semibold">{p.name}</span>
                   <ContactIcons place={p} />
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-white/45">{p.neighborhood ?? p.address}</span>
+                <span className="mt-0.5 block truncate text-xs text-fg/45">{p.neighborhood ?? p.address}</span>
                 <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                   {p.rating != null && <Stars rating={p.rating} count={p.ratingCount} />}
                   {badgesFor(p).map((b) => (
@@ -523,16 +524,16 @@ function ResultsView(props: {
                       {b.label}
                     </span>
                   ))}
-                  {p.leadStage && <span className="rounded-md bg-white/10 px-1.5 py-px text-[10px] text-white/70">no CRM</span>}
-                  {p.approachable === false && <span className="rounded-md bg-white/5 px-1.5 py-px text-[10px] text-white/40">sem contato</span>}
+                  {p.leadStage && <span className="rounded-md bg-fg/10 px-1.5 py-px text-[10px] text-fg/70">no CRM</span>}
+                  {p.approachable === false && <span className="rounded-md bg-fg/5 px-1.5 py-px text-[10px] text-fg/40">sem contato</span>}
                 </span>
               </span>
             </button>
           </li>
         ))}
-        {places.length === 0 && <li className="p-6 text-center text-sm text-white/40">Nenhum negócio neste filtro.</li>}
+        {places.length === 0 && <li className="p-6 text-center text-sm text-fg/40">Nenhum negócio neste filtro.</li>}
       </ul>
-      <p className="border-t border-white/10 px-5 py-2 text-[10px] text-white/30">Lugares: Overture Maps (dados abertos) · Mapa: © OpenStreetMap</p>
+      <p className="border-t border-fg/10 px-5 py-2 text-[10px] text-fg/30">Lugares: Overture Maps (dados abertos) · Mapa: © OpenStreetMap</p>
     </div>
   );
 }

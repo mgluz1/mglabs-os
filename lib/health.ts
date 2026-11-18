@@ -22,7 +22,7 @@ export async function checkDatabase(): Promise<DbHealth> {
         (select count(*)::int from information_schema.tables
           where table_schema = 'public'
             and table_name in ('places','place_contacts','site_audits','lead_scores',
-                               'searches','leads','activities','optouts','api_usage')) as tables
+                               'searches','leads','activities','optouts','api_usage','workspaces','crm_companies','crm_deals','crm_stages')) as tables
     `);
     const r = rows[0];
     return { ok: true, postgres: r.postgres, postgis: r.postgis, pgTrgm: r.pg_trgm, tables: r.tables, ms: Date.now() - started };

@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 
 import { processAuditBatch } from "@/lib/audit/process";
-import { requireUser, UnauthorizedError } from "@/lib/auth/require";
+import { NoAccessError, requireCtx } from "@/lib/services/ctx";
 
 export const maxDuration = 60;
 
@@ -9,9 +9,9 @@ export const maxDuration = 60;
 export async function POST() {
   await connection();
   try {
-    await requireUser();
+    await requireCtx();
   } catch (e) {
-    if (e instanceof UnauthorizedError) return Response.json({ error: e.message }, { status: 401 });
+    if (e instanceof NoAccessError) return Response.json({ error: e.message }, { status: 401 });
     throw e;
   }
   return Response.json(await processAuditBatch(5));
