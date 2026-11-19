@@ -32,13 +32,57 @@ export const templateInput = z.object({
 });
 export type TemplateInput = z.input<typeof templateInput>;
 
+const isUndefinedColumn = (e: unknown) => {
+  const err = e as { code?: string; cause?: { code?: string }; message?: string } | null;
+  const code = err?.code ?? err?.cause?.code;
+  return code === "42703" || (typeof err?.message === "string" && /does not exist/i.test(err.message));
+};
+
 export async function listTemplates(ctx: Ctx, f: { objective?: string } = {}) {
   assertModule(ctx, "comercial");
-  return db
-    .select()
-    .from(crmMessageTemplates)
-    .where(and(eq(crmMessageTemplates.workspaceId, ctx.workspaceId), eq(crmMessageTemplates.active, true), f.objective ? eq(crmMessageTemplates.objective, f.objective) : undefined))
-    .orderBy(desc(crmMessageTemplates.favorite), crmMessageTemplates.objective, crmMessageTemplates.name);
+  const where = and(eq(crmMessageTemplates.workspaceId, ctx.workspaceId), eq(crmMessageTemplates.active, true), f.objective ? eq(crmMessageTemplates.objective, f.objective) : undefined);
+  try {
+    return await db
+      .select({
+        id: crmMessageTemplates.id,
+        workspaceId: crmMessageTemplates.workspaceId,
+        name: crmMessageTemplates.name,
+        objective: crmMessageTemplates.objective,
+        service: crmMessageTemplates.service,
+        tone: crmMessageTemplates.tone,
+        channel: crmMessageTemplates.channel,
+        body: crmMessageTemplates.body,
+        version: crmMessageTemplates.version,
+        favorite: crmMessageTemplates.favorite,
+        active: crmMessageTemplates.active,
+        createdAt: crmMessageTemplates.createdAt,
+        updatedAt: crmMessageTemplates.updatedAt,
+      })
+      .from(crmMessageTemplates)
+      .where(where)
+      .orderBy(desc(crmMessageTemplates.favorite), crmMessageTemplates.objective, crmMessageTemplates.name);
+  } catch (e) {
+    if (!isUndefinedColumn(e)) throw e;
+    const rows = await db
+      .select({
+        id: crmMessageTemplates.id,
+        workspaceId: crmMessageTemplates.workspaceId,
+        name: crmMessageTemplates.name,
+        objective: crmMessageTemplates.objective,
+        service: crmMessageTemplates.service,
+        tone: crmMessageTemplates.tone,
+        channel: crmMessageTemplates.channel,
+        body: crmMessageTemplates.body,
+        version: crmMessageTemplates.version,
+        active: crmMessageTemplates.active,
+        createdAt: crmMessageTemplates.createdAt,
+        updatedAt: crmMessageTemplates.updatedAt,
+      })
+      .from(crmMessageTemplates)
+      .where(where)
+      .orderBy(crmMessageTemplates.objective, crmMessageTemplates.name);
+    return rows.map((r) => ({ ...r, favorite: false }));
+  }
 }
 
 export async function saveTemplate(ctx: Ctx, id: string | null, raw: TemplateInput) {
@@ -324,6 +368,26 @@ export const draftInput = z.object({
 });
 export type DraftInput = z.input<typeof draftInput>;
 
+const draftReturn = {
+  id: crmMessageDrafts.id,
+  workspaceId: crmMessageDrafts.workspaceId,
+  dealId: crmMessageDrafts.dealId,
+  companyId: crmMessageDrafts.companyId,
+  contactId: crmMessageDrafts.contactId,
+  objective: crmMessageDrafts.objective,
+  service: crmMessageDrafts.service,
+  tone: crmMessageDrafts.tone,
+  channel: crmMessageDrafts.channel,
+  body: crmMessageDrafts.body,
+  origin: crmMessageDrafts.origin,
+  templateId: crmMessageDrafts.templateId,
+  facts: crmMessageDrafts.facts,
+  status: crmMessageDrafts.status,
+  sentAt: crmMessageDrafts.sentAt,
+  createdBy: crmMessageDrafts.createdBy,
+  createdAt: crmMessageDrafts.createdAt,
+};
+
 export async function saveDraft(ctx: Ctx, raw: DraftInput, draftId?: string | null) {
   assertWrite(ctx);
   assertModule(ctx, "comercial");
@@ -332,7 +396,7 @@ export async function saveDraft(ctx: Ctx, raw: DraftInput, draftId?: string | nu
   if (block.blocked) throw new ValidationError(block.reason ?? "Contato bloqueado.");
   if (draftId) {
     const [cur] = await db
-      .select()
+      .select({ id: crmMessageDrafts.id, status: crmMessageDrafts.status })
       .from(crmMessageDrafts)
       .where(and(eq(crmMessageDrafts.id, draftId), eq(crmMessageDrafts.workspaceId, ctx.workspaceId)));
     if (cur && cur.status === "rascunho") {
@@ -340,7 +404,7 @@ export async function saveDraft(ctx: Ctx, raw: DraftInput, draftId?: string | nu
         .update(crmMessageDrafts)
         .set({ ...i, origin: ctx.actor === "mcp" ? "mcp" : i.origin })
         .where(and(eq(crmMessageDrafts.id, cur.id), eq(crmMessageDrafts.workspaceId, ctx.workspaceId)))
-        .returning();
+        .returning(draftReturn);
       await audit(ctx, "update", "message_draft", updated.id, { origin: updated.origin });
       return updated;
     }
@@ -348,7 +412,7 @@ export async function saveDraft(ctx: Ctx, raw: DraftInput, draftId?: string | nu
   const [row] = await db
     .insert(crmMessageDrafts)
     .values({ ...i, origin: ctx.actor === "mcp" ? "mcp" : i.origin, workspaceId: ctx.workspaceId, createdBy: ctx.userId })
-    .returning();
+    .returning(draftReturn);
   await audit(ctx, "create", "message_draft", row.id, { origin: row.origin });
   return row;
 }

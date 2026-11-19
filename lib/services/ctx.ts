@@ -60,8 +60,32 @@ export function assertAdmin(ctx: Ctx, msg = "Só administradores podem executar 
 }
 export const canModule = (ctx: Ctx, mod: Module) => !!ACCESS[ctx.role]?.includes(mod);
 
+let schemaPromise: Promise<void> | null = null;
+
+/**
+ * Garante de forma idempotente as colunas opcionais das migrations 0006/0007 caso o deploy suba
+ * antes do `npm run db:migrate`. Falhas por permissão restrita são ignoradas com segurança.
+ */
+export function ensureRuntimeSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      try {
+        await db.execute(sql`alter table crm_message_drafts add column if not exists idempotency_key text`);
+        await db.execute(
+          sql`create unique index if not exists crm_message_drafts_idempotency_uq on crm_message_drafts (workspace_id, idempotency_key) where idempotency_key is not null`,
+        );
+        await db.execute(sql`alter table crm_message_templates add column if not exists favorite boolean not null default false`);
+      } catch (e) {
+        console.warn("ensureRuntimeSchema", e instanceof Error ? e.message : e);
+      }
+    })();
+  }
+  return schemaPromise;
+}
+
 /** Cria etapas, catálogo e modelos iniciais (idempotente). Não insere dados de clientes. */
 export async function seedWorkspaceDefaults(workspaceId: string) {
+  await ensureRuntimeSchema();
   await db
     .insert(crmStages)
     .values(STAGE_DEFS.map((s, i) => ({ workspaceId, key: s.key, label: s.label, position: i + 1, probability: s.probability, kind: s.kind })))
@@ -79,23 +103,21 @@ export async function seedWorkspaceDefaults(workspaceId: string) {
       ].map(([name, description, days], i) => ({ workspaceId, name: name as string, description: description as string, estimatedDays: days as number | null, position: i })),
     );
   }
-  const existingTpls = await db
-    .select({ name: crmMessageTemplates.name })
-    .from(crmMessageTemplates)
-    .where(eq(crmMessageTemplates.workspaceId, workspaceId));
-  const haveNames = new Set(existingTpls.map((t) => t.name));
-  const missingTpls = DEFAULT_TEMPLATES.filter((t) => !haveNames.has(t.name));
-  if (missingTpls.length) {
-    await db.insert(crmMessageTemplates).values(
-      missingTpls.map((t) => ({
-        workspaceId,
-        name: t.name,
-        objective: t.objective,
-        service: t.service ?? null,
-        body: t.body,
-        channel: "whatsapp",
-      })),
-    );
+  try {
+    const existingTpls = await db
+      .select({ name: crmMessageTemplates.name })
+      .from(crmMessageTemplates)
+      .where(eq(crmMessageTemplates.workspaceId, workspaceId));
+    const haveNames = new Set(existingTpls.map((t) => t.name));
+    const missingTpls = DEFAULT_TEMPLATES.filter((t) => !haveNames.has(t.name));
+    for (const t of missingTpls) {
+      await db.execute(sql`
+        insert into crm_message_templates (workspace_id, name, objective, service, body, channel)
+        values (${workspaceId}::uuid, ${t.name}, ${t.objective}, ${t.service ?? null}, ${t.body}, 'whatsapp')
+      `);
+    }
+  } catch (e) {
+    console.warn("seedWorkspaceDefaults.templates", e instanceof Error ? e.message : e);
   }
 }
 

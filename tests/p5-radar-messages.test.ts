@@ -100,7 +100,8 @@ import { CATEGORIES, categoryLabel, searchCategories } from "@/lib/config/catego
 import { DEFAULT_TEMPLATES, pickTemplateForOffer } from "@/lib/messages";
 import { countAvailablePlaces, runSearch } from "@/lib/places/search";
 import type { Ctx } from "@/lib/services/ctx";
-import { recordClientReply, registerSent, scheduleMessageFollowUp, toggleTemplateFavorite } from "@/lib/services/messages";
+import { seedWorkspaceDefaults } from "@/lib/services/ctx";
+import { listTemplates, recordClientReply, registerSent, scheduleMessageFollowUp, toggleTemplateFavorite } from "@/lib/services/messages";
 
 const OWNER_CTX: Ctx = {
   workspaceId: "11111111-1111-4111-8111-111111111111",
@@ -338,5 +339,46 @@ describe("Radar + Mensagens + Gemini (melhorias)", () => {
     pushRows([{ id: TID, name: "Modelo 1", favorite: true }]);
     const fav = await toggleTemplateFavorite(OWNER_CTX, TID, true);
     expect(fav.favorite).toBe(true);
+  });
+
+  it("resiliência de schema: seedWorkspaceDefaults garante colunas 0006/0007 e insere templates sem falhar", async () => {
+    resetRows();
+    pushRows(
+      [], // alter idempotency_key
+      [], // create index
+      [], // alter favorite
+      [], // insert stages
+      [{ n: 5 }], // count services (já existem)
+      [{ name: "Primeiro contato — direto" }], // templates existentes
+    );
+    await expect(seedWorkspaceDefaults(OWNER_CTX.workspaceId)).resolves.toBeUndefined();
+    const sqlText = capturedSql.map((q) => q.sql).join("\n");
+    expect(sqlText).toContain("add column if not exists favorite");
+    expect(sqlText).toContain("add column if not exists idempotency_key");
+    expect(sqlText).not.toContain('insert into "crm_message_templates"');
+
+    // listTemplates usa fallback quando a coluna favorite ainda não existe (42703)
+    const selectMock = vi.spyOn(await import("@/lib/db").then((m) => m.db), "select");
+    selectMock
+      .mockImplementationOnce(() => {
+        const b: Record<string, unknown> = {
+          from: () => b,
+          where: () => b,
+          orderBy: () => Promise.reject(Object.assign(new Error('column "favorite" does not exist'), { code: "42703" })),
+        };
+        return b as never;
+      })
+      .mockImplementationOnce(() => {
+        const b: Record<string, unknown> = {
+          from: () => b,
+          where: () => b,
+          orderBy: () => Promise.resolve([{ id: "t1", name: "Direto", objective: "primeiro_contato", body: "Olá" }]),
+        };
+        return b as never;
+      });
+    const tpls = await listTemplates(OWNER_CTX);
+    expect(tpls).toHaveLength(1);
+    expect(tpls[0]?.favorite).toBe(false);
+    selectMock.mockRestore();
   });
 });
