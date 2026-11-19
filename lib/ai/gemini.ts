@@ -31,7 +31,7 @@ export function assertAiEnabled() {
   return cfg;
 }
 
-export type AiFeature = "mensagem" | "resumo" | "proxima_acao" | "tarefas";
+export type AiFeature = "mensagem" | "resumo" | "proxima_acao" | "tarefas" | "resposta" | "refino" | "teste";
 
 /** Reserva 1 chamada do limite diário (atômico com advisory lock por workspace/dia). Falso = limite atingido. */
 export async function reserveAiQuota(ctx: Ctx, feature: AiFeature, limit: number): Promise<boolean> {
@@ -71,6 +71,58 @@ function friendly(e: unknown): AiError {
   if (status === 404) return new AiError(`O modelo "${aiConfig().model}" não existe para esta conta. Ajuste GEMINI_MODEL (veja os modelos disponíveis no AI Studio).`);
   if (/abort|timeout/i.test(msg)) return new AiError("O Gemini demorou demais para responder. Tente novamente.");
   return new AiError("Não foi possível usar a IA agora. O modo manual continua disponível.");
+}
+
+type Ai = InstanceType<typeof GoogleGenAI>;
+
+/** Lista os modelos da conta e escolhe um Flash/Flash-Lite estável que aceite generateContent (preferindo o mais novo). */
+export async function discoverModel(ai: Ai, skip: Set<string> = new Set()): Promise<string | null> {
+  try {
+    const names: string[] = [];
+    const pager = await ai.models.list({ config: { pageSize: 100 } });
+    for await (const m of pager) {
+      const name = (m.name ?? "").replace(/^models\//, "");
+      const actions = m.supportedActions ?? [];
+      if (!/flash/i.test(name) || /(image|tts|live|audio|embed|preview|exp|thinking|robotics|computer)/i.test(name)) continue;
+      if (actions.length && !actions.includes("generateContent")) continue;
+      if (!skip.has(name)) names.push(name);
+    }
+    // ordena por versão desc e prefere "lite" (cota mais folgada no plano gratuito)
+    const ver = (n: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(n)?.[1] ?? 0);
+    names.sort((a, b) => ver(b) - ver(a) || Number(/lite/.test(b)) - Number(/lite/.test(a)));
+    return names[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type GeminiTest = { ok: boolean; keyConfigured: boolean; model: string; modelUsed?: string; latencyMs?: number; available?: string[]; error?: string };
+
+/** Teste de conexão de ponta a ponta (1 chamada mínima, sem dados do CRM). Conta 1 no limite diário. */
+export async function testGemini(ctx: Ctx): Promise<GeminiTest> {
+  const cfg = aiConfig();
+  if (!cfg.hasKey) return { ok: false, keyConfigured: false, model: cfg.model, error: "GEMINI_API_KEY não encontrada no ambiente. Adicione a chave na Vercel e faça um novo deploy." };
+  if (!cfg.enabled) return { ok: false, keyConfigured: true, model: cfg.model, error: "GEMINI_ENABLED=false desativa a IA. Remova a variável ou troque por true." };
+  const started = Date.now();
+  try {
+    const out = await generateJson(ctx, "teste", { system: "Você responde somente JSON.", user: 'Responda exatamente {"ok":true}.', schema: z.object({ ok: z.boolean() }), temperature: 0, maxOutputTokens: 30 });
+    let available: string[] | undefined;
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { timeout: 10_000 } });
+      available = [];
+      const pager = await ai.models.list({ config: { pageSize: 100 } });
+      for await (const m of pager) {
+        const n = (m.name ?? "").replace(/^models\//, "");
+        if (/^gemini-.*flash/i.test(n) && !/(image|tts|live|audio|embed)/i.test(n)) available.push(n);
+        if (available.length >= 12) break;
+      }
+    } catch {
+      available = undefined;
+    }
+    return { ok: out.ok, keyConfigured: true, model: cfg.model, latencyMs: Date.now() - started, available };
+  } catch (e) {
+    return { ok: false, keyConfigured: true, model: cfg.model, latencyMs: Date.now() - started, error: e instanceof Error ? e.message : "Falha no teste." };
+  }
 }
 
 /** Confere sem gastar cota se o modelo configurado existe para a chave atual. */
@@ -122,7 +174,17 @@ export async function generateJson<S extends z.ZodTypeAny>(ctx: Ctx, feature: Ai
         if (status !== 404) throw err;
       }
     }
-    if (!res) throw lastErr ?? new Error("Nenhum modelo Gemini disponível.");
+    if (!res) {
+      // todos os candidatos deram 404: descobre na própria conta um modelo Flash que gere conteúdo
+      const found = await discoverModel(ai, new Set(candidates));
+      if (!found) throw lastErr ?? new Error("Nenhum modelo Gemini disponível.");
+      res = await ai.models.generateContent({
+        model: found,
+        contents: input.user,
+        config: { systemInstruction: input.system, temperature: input.temperature ?? 0.7, maxOutputTokens: input.maxOutputTokens ?? 1100, responseMimeType: "application/json", responseJsonSchema: z.toJSONSchema(input.schema) },
+      });
+      modelUsed = found;
+    }
     const raw = res.text ?? "";
     const parsed = input.schema.safeParse(JSON.parse(raw.replace(/^```json\s*|```\s*$/g, "")));
     console.info("gemini", { feature, model: modelUsed, ms: Date.now() - started, ok: parsed.success });

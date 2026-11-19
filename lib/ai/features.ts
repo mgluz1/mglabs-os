@@ -4,8 +4,11 @@ import { z } from "zod";
 
 import { MESSAGE_LENGTHS, MESSAGE_OBJECTIVES, MESSAGE_TONES, STAGE_DEFS, labelOf, type MessageLengthId } from "@/lib/config/crm";
 import { assertAiEnabled, generateJson } from "@/lib/ai/gemini";
+import { maskReversible } from "@/lib/ai/mask";
 import { riskWarnings, sanitizeForAi } from "@/lib/ai/sanitize";
-import { COLD_OBJECTIVES, renderTemplate, withOptOut } from "@/lib/messages";
+import { REFINE_ACTIONS, type RefineActionId } from "@/lib/refine-actions";
+import { detectStopRequest, quickIntent, REPLY_INTENTS, suggestedStageForIntent, type ReplyIntentId } from "@/lib/reply-intel";
+import { COLD_OBJECTIVES, OPT_OUT_LINE, renderTemplate, withOptOut } from "@/lib/messages";
 import { assertModule, assertWrite, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { getDeal } from "@/lib/services/deals";
 import { messageContext, varsFor } from "@/lib/services/messages";
@@ -160,4 +163,127 @@ export async function suggestTasks(ctx: Ctx, dealId: string, consent: boolean) {
   assertAiEnabled();
   const { text } = await dealDigest(ctx, dealId);
   return generateJson(ctx, "tarefas", { system: DEAL_SYSTEM, user: `${text}\n\nSugira de 1 a 4 tarefas curtas e verificáveis que ainda não existam na lista. JSON: {"tarefas":[{"titulo":"...","prazo_dias":2,"prioridade":"media"}]}`, schema: tasksSchema, temperature: 0.4 });
+}
+
+// ---------- 5. Assistente de resposta do cliente ----------
+
+const REPLY_SYSTEM = `Você ajuda o fundador da MGLABS ({{remetente}}) a responder clientes no WhatsApp, em português do Brasil, de forma humana, curta e honesta.
+Você recebe a resposta de um cliente (dados pessoais já trocados por marcadores como {{TEL_1}}, {{LINK_1}}) e o contexto do negócio.
+Regras:
+- Classifique a intenção, resuma em 1 frase, diga o próximo passo e proponha de 1 a 3 rascunhos de resposta realmente diferentes.
+- Nunca invente preço, prazo, desconto, garantia ou fato que não esteja no contexto. Se pedirem valores, proponha entender o escopo antes (pergunta simples) ou combinar uma conversa curta.
+- Sem tom robótico, sem "Prezado", no máximo 1 emoji. Use {{contato}} para a saudação ("Olá{{contato}}!") e {{remetente}} para seu nome; mantenha marcadores como {{TEL_1}} exatamente como vieram, se precisar citá-los.
+- Se o cliente pediu para parar, a intenção é "parar_contato" e o único rascunho é um pedido de desculpas curto confirmando que não haverá novos contatos.
+- Se o cliente não tem interesse, agradeça sem insistir.
+Responda exclusivamente em JSON.`;
+
+const INTENT_IDS = REPLY_INTENTS.map((i) => i.id) as [ReplyIntentId, ...ReplyIntentId[]];
+const replySchema = z.object({
+  intencao: z.enum(INTENT_IDS),
+  sentimento: z.enum(["positivo", "neutro", "negativo"]),
+  resumo: z.string().max(280),
+  proximo_passo: z.string().max(240),
+  prazo_retorno_dias: z.number().int().min(0).max(30),
+  rascunhos: z.array(z.object({ text: z.string().min(5).max(900) })).min(1).max(3),
+});
+
+export type ReplyAnalysis = {
+  intent: ReplyIntentId;
+  sentiment: "positivo" | "neutro" | "negativo";
+  summary: string;
+  nextStep: string;
+  followUpDays: number;
+  suggestedStage: string | null;
+  stopRequested: boolean;
+  drafts: MessageVariant[];
+  /** true = veio do Gemini; false = leitura por regras (sem IA). */
+  usedAi: boolean;
+};
+
+/** Leitura sem IA (sempre disponível): intenção por palavras-chave e pedido de parada. */
+export function analyzeReplyOffline(text: string): ReplyAnalysis {
+  const stop = detectStopRequest(text);
+  const intent = quickIntent(text);
+  const sug = suggestedStageForIntent(intent);
+  return { intent, sentiment: stop || intent === "sem_interesse" ? "negativo" : intent === "interesse" || intent === "agendar_reuniao" ? "positivo" : "neutro", summary: "", nextStep: "", followUpDays: sug.followUpDays, suggestedStage: sug.stage, stopRequested: stop, drafts: [], usedAi: false };
+}
+
+export async function analyzeClientReply(
+  ctx: Ctx,
+  input: { dealId?: string | null; companyId?: string | null; contactId?: string | null; reply: string; sender: string; consent: boolean },
+): Promise<ReplyAnalysis> {
+  assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  const reply = input.reply.trim().slice(0, 1500);
+  if (reply.length < 2) throw new ValidationError("Cole a resposta do cliente.");
+  const offline = analyzeReplyOffline(reply);
+  // pedido de parada nunca depende de IA nem envia nada ao Gemini
+  if (offline.stopRequested) return offline;
+  if (!input.consent) throw new ValidationError("Autorize o envio ao Gemini para analisar com IA.");
+  assertAiEnabled();
+
+  const mc = await messageContext(ctx, input);
+  const recipient = mc.recipients.find((r) => r.contactId === input.contactId);
+  const masked = maskReversible(reply, { names: [mc.companyName, mc.contactName, recipient?.contactName], maxLen: 1500 });
+  const history = mc.recentHistory
+    .slice(0, 4)
+    .reverse()
+    .map((h) => `- ${h.kind}: ${sanitizeForAi(h.content?.replaceAll(mc.companyName, "[empresa]"), { maxLen: 160 })}`)
+    .filter((l) => !l.endsWith(": "));
+  const user = [
+    `Etapa no CRM: ${mc.dealStageLabel ?? "sem negócio"}`,
+    `Segmento: ${mc.category ? sanitizeForAi(mc.category, { maxLen: 40 }) : "não informado"}`,
+    `Serviço em pauta: ${sanitizeForAi(mc.serviceType ?? "site profissional", { maxLen: 80 })}`,
+    `Histórico recente:${history.length ? "\n" + history.join("\n") : "\n- nenhum"}`,
+    `Resposta do cliente (entre aspas triplas):\n"""${masked.masked}"""`,
+    `JSON: {"intencao":"${INTENT_IDS.join("|")}","sentimento":"positivo|neutro|negativo","resumo":"...","proximo_passo":"...","prazo_retorno_dias":1,"rascunhos":[{"text":"..."}]}`,
+  ].join("\n");
+
+  const out = await generateJson(ctx, "resposta", { system: REPLY_SYSTEM, user, schema: replySchema, temperature: 0.6, maxOutputTokens: 1300 });
+  const vars = varsFor(mc, { sender: input.sender, service: null, observation: null });
+  const drafts = out.rascunhos.map((d) => {
+    const text = renderTemplate(masked.restore(d.text), vars);
+    return { text, warnings: riskWarnings(text) };
+  });
+  // a etapa sugerida vem de uma tabela fixa (a IA só classifica a intenção); quem aplica é o usuário
+  const sug = suggestedStageForIntent(out.intencao);
+  return {
+    intent: out.intencao,
+    sentiment: out.sentimento,
+    summary: masked.restore(out.resumo),
+    nextStep: masked.restore(out.proximo_passo),
+    followUpDays: out.prazo_retorno_dias || sug.followUpDays,
+    suggestedStage: sug.stage,
+    stopRequested: out.intencao === "parar_contato",
+    drafts: out.intencao === "parar_contato" ? drafts.slice(0, 1) : drafts,
+    usedAi: true,
+  };
+}
+
+// ---------- 6. Refinar texto ----------
+
+
+const REFINE_SYSTEM = `Você edita mensagens comerciais curtas da MGLABS em português do Brasil, preservando o sentido.
+Regras: não invente fatos, preços, prazos, descontos ou garantias; sem "Prezado", sem jargão, no máximo 1 emoji. Mantenha EXATAMENTE os marcadores entre chaves duplas (ex.: {{TEL_1}}, {{LINK_1}}, {{NOME_1}}) onde eles aparecem ou onde fizer sentido. Não adicione assinatura nem linha de opt-out.
+Responda somente JSON: {"text":"..."}.`;
+const refineSchema = z.object({ text: z.string().min(5).max(1600) });
+
+export async function refineMessage(ctx: Ctx, input: { text: string; action: RefineActionId; consent: boolean }): Promise<MessageVariant & { original: string }> {
+  assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  if (!input.consent) throw new ValidationError("Autorize o envio ao Gemini para refinar com IA.");
+  const action = REFINE_ACTIONS.find((a) => a.id === input.action);
+  if (!action) throw new ValidationError("Ação de refino inválida.");
+  assertAiEnabled();
+  // a linha de opt-out é retirada antes e recolocada depois (a IA não pode alterá-la)
+  const hadOptOut = input.text.includes(OPT_OUT_LINE);
+  const base = input.text.replace(OPT_OUT_LINE, "").trim();
+  if (base.length < 5) throw new ValidationError("Escreva a mensagem antes de refinar.");
+  const masked = maskReversible(base, { maxLen: 1600 });
+  const out = await generateJson(ctx, "refino", { system: REFINE_SYSTEM, user: `Instrução: ${action.prompt}\n\nTexto:\n"""${masked.masked}"""`, schema: refineSchema, temperature: input.action === "corrigir" ? 0.1 : 0.6, maxOutputTokens: 900 });
+  let text = masked.restore(out.text).trim();
+  // marcador perdido pelo modelo = dado (link/telefone) sumiu: recusa em vez de entregar texto incompleto
+  if (masked.missing(out.text).length) throw new ValidationError("A IA removeu um link ou contato do texto. Tente de novo ou edite manualmente.");
+  if (hadOptOut) text = withOptOut(text);
+  return { text, warnings: riskWarnings(text), original: input.text };
 }

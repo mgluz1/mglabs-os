@@ -12,6 +12,8 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  Undo2,
+  Wand2,
   MessageSquareReply,
   RefreshCw,
   Save,
@@ -26,8 +28,13 @@ import { useCallback, useMemo, useState } from "react";
 
 import { Badge, EmptyState, Field, SectionCard } from "@/components/ui/kit";
 import { ConfirmButton, Dialog, useRun, useToast } from "@/components/ui/overlays";
-import { generateMessagesAction } from "@/lib/actions/ai";
+import { GeminiSetupGuide } from "@/components/settings/gemini-setup";
+import { OutreachQueue } from "@/components/messages/outreach-queue";
+import { ReplyAssistant, type ReplyOutcome } from "@/components/messages/reply-assistant";
+import { generateMessagesAction, refineMessageAction } from "@/lib/actions/ai";
+import { optOutCompanyAction } from "@/lib/actions/crm";
 import {
+  advanceDealAction,
   deleteTemplateAction,
   messageContextAction,
   recordReplyAction,
@@ -38,11 +45,14 @@ import {
   toggleFavoriteTemplateAction,
   whatsappLinkAction,
 } from "@/lib/actions/messages";
-import { MESSAGE_LENGTHS, MESSAGE_OBJECTIVES, MESSAGE_TONES, labelOf, type MessageLengthId } from "@/lib/config/crm";
+import { MESSAGE_LENGTHS, MESSAGE_OBJECTIVES, MESSAGE_TONES, STAGE_DEFS, labelOf, type MessageLengthId } from "@/lib/config/crm";
 import { categoryLabel } from "@/lib/config/categories";
 import { fmtDateTime } from "@/lib/dates";
 import { COLD_OBJECTIVES, OPT_OUT_LINE, TEMPLATE_VARIABLES, buildTemplateText, pickTemplateForOffer } from "@/lib/messages";
+import { planMessage } from "@/lib/message-plan";
+import { REFINE_ACTIONS } from "@/lib/refine-actions";
 import type { MessageContext } from "@/lib/services/messages";
+import type { QueueItem } from "@/lib/services/outreach";
 
 export type Opt = { value: string; label: string };
 type Template = {
@@ -117,6 +127,7 @@ export function MessageStudio({
   initial,
   initialContext,
   initialService = "",
+  queue = [],
 }: {
   options: Opt[];
   templates: Template[];
@@ -127,16 +138,17 @@ export function MessageStudio({
   initial: string;
   initialContext: MessageContext | null;
   initialService?: string;
+  queue?: QueueItem[];
 }) {
   const { run, pending } = useRun();
   const toast = useToast();
-  const [tab, setTab] = useState<"escrever" | "modelos">("escrever");
+  const [tab, setTab] = useState<"escrever" | "fila" | "modelos">("escrever");
   const [leadFilter, setLeadFilter] = useState("");
   const [sel, setSel] = useState(initial);
   const [mc, setMc] = useState<MessageContext | null>(initialContext);
   const [loadingCtx, setLoadingCtx] = useState(false);
 
-  const [objective, setObjective] = useState("primeiro_contato");
+  const [objective, setObjective] = useState<string>(() => (initialContext ? planMessage({ stageKey: initialContext.dealStageKey, history: initialContext.recentHistory }).objective : "primeiro_contato"));
   const [service, setService] = useState(initialContext?.serviceType ?? initialService);
   const [tone, setTone] = useState("natural");
   const [length, setLength] = useState<MessageLengthId>("media");
@@ -152,7 +164,13 @@ export function MessageStudio({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [usedAi, setUsedAi] = useState(ai.usedToday);
-  const [consentOpen, setConsentOpen] = useState(false);
+  const [consentCb, setConsentCb] = useState<(() => void) | null>(null);
+  const [prevText, setPrevText] = useState<string | null>(null);
+  const [refining, setRefining] = useState<string | null>(null);
+  const [justSent, setJustSent] = useState(false);
+  const [replyRaw, setReplyRaw] = useState("");
+  const [replyStop, setReplyStop] = useState(false);
+  const [replyStage, setReplyStage] = useState<string | null>(null);
 
   const [awaiting, setAwaiting] = useState<Channel | null>(null);
   const [followUpDays, setFollowUpDays] = useState(3);
@@ -189,6 +207,7 @@ export function MessageStudio({
         return;
       }
       setMc(r.data);
+      if (!r.data.blocked) setObjective(planMessage({ stageKey: r.data.dealStageKey, history: r.data.recentHistory }).objective);
       setFacts(r.data.facts);
       setRecipientId(r.data.recipients[0]?.id ?? "");
       if (r.data.serviceType) setService(r.data.serviceType);
@@ -204,6 +223,8 @@ export function MessageStudio({
     setActiveDraftId(null);
     setAwaiting(null);
     setConfirmKey(null);
+    setJustSent(false);
+    setPrevText(null);
     void loadCtx(value);
   };
 
@@ -275,16 +296,38 @@ export function MessageStudio({
     setUsedAi((n) => n + 1);
   };
 
-  const askAi = () => {
+  /** Executa `fn` se o usuário já autorizou o envio de contexto anonimizado ao Gemini; senão pergunta antes. */
+  const withConsent = (fn: () => void) => {
     let ok = false;
     try {
       ok = localStorage.getItem("mglabs-ai-consent") === "1";
     } catch {
       /* sem armazenamento: pergunta sempre */
     }
-    if (ok) void generate();
-    else setConsentOpen(true);
+    if (ok) fn();
+    else setConsentCb(() => fn);
   };
+  const askAi = () => withConsent(() => void generate());
+
+  const refine = async (action: (typeof REFINE_ACTIONS)[number]["id"]) => {
+    if (!text.trim()) return;
+    const before = text;
+    setRefining(action);
+    const r = await refineMessageAction({ text: before, action, consent: true });
+    setRefining(null);
+    if (!r.ok) {
+      toast(r.error, "error");
+      return;
+    }
+    setPrevText(before);
+    setText(r.data.text);
+    setOrigin("ia");
+    setUsedAi((n) => n + 1);
+  };
+  const askRefine = (action: (typeof REFINE_ACTIONS)[number]["id"]) => withConsent(() => void refine(action));
+
+  const plan = useMemo(() => (mc && !mc.blocked ? planMessage({ stageKey: mc.dealStageKey, history: mc.recentHistory }) : null), [mc]);
+  const nextInQueue = useMemo(() => queue.find((q) => q.companyId !== mc?.companyId) ?? null, [queue, mc?.companyId]);
 
   const draftInput = () => ({
     dealId: mc?.dealId ?? null,
@@ -336,7 +379,7 @@ export function MessageStudio({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label="Modo do Estúdio" className="flex w-fit rounded-xl border border-line bg-surface p-1 text-sm">
-          {(["escrever", "modelos"] as const).map((t) => (
+          {(["escrever", "fila", "modelos"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -345,7 +388,7 @@ export function MessageStudio({
               onClick={() => setTab(t)}
               className={`rounded-lg px-4 py-1.5 font-medium transition ${tab === t ? "bg-brand text-brand-on" : "text-muted hover:text-fg"}`}
             >
-              {t === "escrever" ? "Central de abordagem" : `Modelos (${templates.length})`}
+              {t === "escrever" ? "Central de abordagem" : t === "fila" ? `Fila (${queue.length})` : `Modelos (${templates.length})`}
             </button>
           ))}
         </div>
@@ -372,7 +415,16 @@ export function MessageStudio({
         )}
       </div>
 
-      {tab === "modelos" ? (
+      {tab === "fila" ? (
+        <OutreachQueue
+          items={queue}
+          onPick={(it) => {
+            setTab("escrever");
+            pick(`d:${it.dealId}`);
+            setObjective(it.objective);
+          }}
+        />
+      ) : tab === "modelos" ? (
         <Templates
           templates={templates}
           onToggleFavorite={(t) => run(() => toggleFavoriteTemplateAction(t.id, !t.favorite), { ok: t.favorite ? "Removido dos favoritos." : "Marcado como favorito." })}
@@ -388,6 +440,24 @@ export function MessageStudio({
           }}
         />
       ) : (
+        <>
+        {justSent && nextInQueue && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ok/40 bg-ok/10 px-4 py-3 text-sm">
+            <span>
+              Registrado! Próximo da fila: <b>{nextInQueue.companyName}</b> — <span className="text-muted">{nextInQueue.reason}</span>
+            </span>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                pick(`d:${nextInQueue.dealId}`);
+                setObjective(nextInQueue.objective);
+              }}
+            >
+              Próximo da fila <Check className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+        )}
         <div className="grid gap-4 lg:grid-cols-[minmax(0,390px)_minmax(0,1fr)]">
           {/* Coluna esquerda: Contexto automático + Estilo */}
           <div className="space-y-4">
@@ -477,11 +547,16 @@ export function MessageStudio({
                         type="button"
                         onClick={() => {
                           setReplySummary("");
+                          setReplyRaw("");
+                          setReplyStop(false);
+                          setReplyStage("conversa");
+                          setReplyFollowDays(2);
+                          setReplyAdvance(true);
                           setReplyOpen(true);
                         }}
                         className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-fg hover:border-brand hover:text-brand"
                       >
-                        <MessageSquareReply className="h-3.5 w-3.5" aria-hidden /> Registrar resposta
+                        <MessageSquareReply className="h-3.5 w-3.5" aria-hidden /> Cliente respondeu
                       </button>
                       <button
                         type="button"
@@ -495,6 +570,20 @@ export function MessageStudio({
                       </button>
                     </div>
                   </div>
+
+                  {plan && (
+                    <div className="rounded-xl border border-brand/30 bg-brand-soft p-3 text-xs">
+                      <p className="eyebrow text-brand">Sugestão de abordagem</p>
+                      <p className="mt-1 text-fg">
+                        <b>{labelOf(MESSAGE_OBJECTIVES, plan.objective)}</b> — {plan.reason}
+                      </p>
+                      {objective !== plan.objective && (
+                        <button type="button" className="btn btn-primary btn-sm mt-2" onClick={() => setObjective(plan.objective)}>
+                          Usar “{labelOf(MESSAGE_OBJECTIVES, plan.objective)}”
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   <Field label="Destinatário / canal">
                     {mc.recipients.length === 0 ? (
@@ -685,9 +774,13 @@ export function MessageStudio({
               }
             >
               {!ai.enabled ? (
-                <p className="text-sm text-muted">
-                  A IA está desativada neste ambiente (sem <code className="rounded bg-fg/8 px-1">GEMINI_API_KEY</code>). O editor manual e todos os modelos continuam 100% funcionais.
-                </p>
+                <div className="space-y-2.5">
+                  <p className="text-sm font-medium">Ative o Gemini gratuito em 2 minutos</p>
+                  <GeminiSetupGuide compact />
+                  <p className="text-xs text-muted">
+                    Depois use <Link href="/configuracoes" className="text-brand underline">Configurações → Testar conexão</Link>. Enquanto isso, o editor manual, os modelos, a fila e a leitura de respostas por regras continuam funcionando.
+                  </p>
+                </div>
               ) : (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
@@ -755,6 +848,37 @@ export function MessageStudio({
                 aria-label="Texto da mensagem"
                 disabled={blocked}
               />
+              {ai.enabled && !blocked && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="Refinar texto com IA">
+                  <span className="eyebrow flex items-center gap-1 text-brand">
+                    <Wand2 className="h-3 w-3" aria-hidden /> Refinar com IA:
+                  </span>
+                  {REFINE_ACTIONS.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      disabled={!text.trim() || !!refining}
+                      onClick={() => askRefine(a.id)}
+                      className="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg transition hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {refining === a.id && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+                      {a.label}
+                    </button>
+                  ))}
+                  {prevText !== null && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-full border border-warn/50 px-2.5 py-1 text-xs font-medium text-warn hover:bg-warn/10"
+                      onClick={() => {
+                        setText(prevText);
+                        setPrevText(null);
+                      }}
+                    >
+                      <Undo2 className="h-3 w-3" aria-hidden /> Desfazer
+                    </button>
+                  )}
+                </div>
+              )}
               <p className="mt-1 text-[11px] text-muted">Variáveis aceitas em modelos: {TEMPLATE_VARIABLES.map((v) => `{{${v}}}`).join(" ")}</p>
 
               {awaiting ? (
@@ -813,6 +937,8 @@ export function MessageStudio({
                               setActiveDraftId(null);
                               setText("");
                               setVariants([]);
+                              setPrevText(null);
+                              setJustSent(true);
                             },
                           },
                         )
@@ -978,16 +1104,17 @@ export function MessageStudio({
             </SectionCard>
           </div>
         </div>
+        </>
       )}
 
       {/* Dialog: consentimento Gemini */}
       <Dialog
-        open={consentOpen}
-        onClose={() => setConsentOpen(false)}
-        title="Usar o Gemini para gerar variações"
+        open={!!consentCb}
+        onClose={() => setConsentCb(null)}
+        title="Usar o Gemini neste texto"
         footer={
           <>
-            <button type="button" className="btn btn-ghost" onClick={() => setConsentOpen(false)}>
+            <button type="button" className="btn btn-ghost" onClick={() => setConsentCb(null)}>
               Cancelar
             </button>
             <button
@@ -999,19 +1126,20 @@ export function MessageStudio({
                 } catch {
                   /* ok */
                 }
-                setConsentOpen(false);
-                void generate();
+                const cb = consentCb;
+                setConsentCb(null);
+                cb?.();
               }}
             >
-              Autorizar e gerar
+              Autorizar e continuar
             </button>
           </>
         }
       >
         <p className="text-sm">
-          Para gerar até 3 versões naturais, o servidor envia ao Gemini apenas contexto comercial anonimizado: segmento, cidade, presença digital, sinais marcados do Radar, resumo das últimas interações e sua observação.
+          Para gerar, refinar ou analisar uma resposta, o servidor envia ao Gemini apenas contexto comercial anonimizado: segmento, cidade, presença digital, sinais marcados do Radar, resumo das últimas interações, sua observação e o texto em questão.
         </p>
-        <p className="mt-2 text-sm text-muted">Telefones, e-mails, links e nomes pessoais são removidos antes do envio.</p>
+        <p className="mt-2 text-sm text-muted">Telefones, e-mails, links, perfis e nomes pessoais são removidos ou trocados por marcadores antes do envio e restaurados só aqui. No plano gratuito do Google, o conteúdo pode ser usado para melhorar produtos — por isso nada pessoal vai junto.</p>
       </Dialog>
 
       {/* Dialog: salvar modelo / favorito */}
@@ -1059,11 +1187,12 @@ export function MessageStudio({
         <p className="mt-2 text-xs text-muted">Você pode usar variáveis como {"{{empresa}}"}, {"{{contato}}"} e {"{{servico}}"} para reaproveitar em outros leads.</p>
       </Dialog>
 
-      {/* Dialog: registrar resposta do cliente */}
+      {/* Dialog: registrar resposta do cliente (com assistente) */}
       <Dialog
         open={replyOpen}
         onClose={() => setReplyOpen(false)}
-        title="Registrar resposta do cliente"
+        title="Resposta do cliente"
+        wide
         footer={
           <>
             <button type="button" className="btn btn-ghost" onClick={() => setReplyOpen(false)}>
@@ -1072,65 +1201,102 @@ export function MessageStudio({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={!mc || !replySummary.trim() || pending}
+              disabled={!mc || !(replySummary.trim() || replyRaw.trim()) || pending}
               onClick={() =>
                 mc &&
                 run(
-                  () =>
-                    recordReplyAction({
+                  async () => {
+                    const r = await recordReplyAction({
                       companyId: mc.companyId,
                       dealId: mc.dealId,
                       contactId: recipient?.contactId ?? mc.contactId,
                       channel: channel === "whatsapp" || channel === "email" || channel === "instagram" ? channel : "whatsapp",
-                      summary: replySummary,
-                      advanceToConversation: replyAdvance,
-                      followUpDays: replyFollowDays,
-                    }),
+                      summary: (replySummary.trim() || replyRaw.trim()).slice(0, 2000),
+                      advanceToConversation: false,
+                      followUpDays: replyStop ? 0 : replyFollowDays,
+                    });
+                    // só avança de etapa se o usuário deixou marcado (nunca volta etapa, nunca fecha negócio)
+                    if (r.ok && mc.dealId && replyAdvance && replyStage && replyStage !== "perdido") await advanceDealAction(mc.dealId, replyStage);
+                    return r;
+                  },
                   {
                     ok: "Resposta registrada no histórico.",
                     onOk: () => {
                       setReplyOpen(false);
-                      setObjective("resposta_interesse");
                       void loadCtx(sel);
                     },
                   },
                 )
               }
             >
-              Salvar resposta
+              Salvar no histórico
             </button>
           </>
         }
       >
-        <div className="space-y-3">
-          <Field label="O que o cliente respondeu?">
-            <textarea
-              autoFocus
-              className="input"
-              rows={3}
-              value={replySummary}
-              onChange={(e) => setReplySummary(e.target.value)}
-              placeholder="Ex.: Pediu para enviar valores e exemplos de sites feitos na área."
+        {mc && (
+          <div className="space-y-4">
+            <ReplyAssistant
+              dealId={mc.dealId}
+              companyId={mc.companyId}
+              contactId={recipient?.contactId ?? mc.contactId}
+              aiEnabled={ai.enabled}
+              withConsent={withConsent}
+              text={replyRaw}
+              setText={setReplyRaw}
+              onOutcome={(o: ReplyOutcome) => {
+                setReplyStop(o.stop);
+                setReplyStage(o.stage);
+                setReplyFollowDays(o.followUpDays > 0 ? Math.min(o.followUpDays, 30) : 0);
+                setReplyAdvance(!o.stop && !!o.stage && o.stage !== "perdido");
+                if (o.summary) setReplySummary(o.summary);
+              }}
+              onUseDraft={(t) => {
+                setText(t);
+                setOrigin("ia");
+                setObjective("resposta_interesse");
+                setReplyOpen(false);
+                toast("Resposta colocada no editor. Revise antes de enviar.");
+              }}
+              onOptOut={() =>
+                run(() => optOutCompanyAction(mc.companyId, "Pediu para parar de receber mensagens", recipient?.contactId ?? mc.contactId), {
+                  ok: "Contato marcado como “não contatar”.",
+                  onOk: () => {
+                    setReplyOpen(false);
+                    void loadCtx(sel);
+                  },
+                })
+              }
             />
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Próximo retorno (dias)">
-              <select className="input" value={replyFollowDays} onChange={(e) => setReplyFollowDays(Number(e.target.value))}>
-                <option value={1}>Amanhã (1 dia)</option>
-                <option value={2}>Em 2 dias</option>
-                <option value={3}>Em 3 dias</option>
-                <option value={7}>Em 7 dias</option>
-                <option value={0}>Não agendar tarefa</option>
-              </select>
-            </Field>
-            {mc?.dealId && (
-              <label className="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm">
-                <input type="checkbox" className="accent-[var(--brand)]" checked={replyAdvance} onChange={(e) => setReplyAdvance(e.target.checked)} />
-                <span>Avançar CRM para “Conversa”</span>
-              </label>
-            )}
+
+            <div className="space-y-3 border-t border-line pt-3">
+              <Field label="Resumo para o histórico (opcional — se vazio, vai o texto colado)">
+                <textarea className="input" rows={2} value={replySummary} onChange={(e) => setReplySummary(e.target.value)} placeholder="Ex.: Pediu valores e exemplos de sites feitos na área." />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Próximo retorno">
+                  <select className="input" value={replyFollowDays} disabled={replyStop} onChange={(e) => setReplyFollowDays(Number(e.target.value))}>
+                    {[...new Set([1, 2, 3, 7, replyFollowDays])]
+                      .filter((d) => d > 0)
+                      .sort((x, y) => x - y)
+                      .map((d) => (
+                        <option key={d} value={d}>
+                          {d === 1 ? "Amanhã (1 dia)" : `Em ${d} dias`}
+                        </option>
+                      ))}
+                    <option value={0}>Não agendar tarefa</option>
+                  </select>
+                </Field>
+                {mc.dealId && replyStage && replyStage !== "perdido" && !replyStop && (
+                  <label className="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm">
+                    <input type="checkbox" className="accent-[var(--brand)]" checked={replyAdvance} onChange={(e) => setReplyAdvance(e.target.checked)} />
+                    <span>Avançar CRM para “{STAGE_DEFS.find((st) => st.key === replyStage)?.label ?? replyStage}” (só se for adiante)</span>
+                  </label>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </Dialog>
 
       {/* Dialog: agendar follow-up rápido */}

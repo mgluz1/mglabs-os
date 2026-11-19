@@ -44,7 +44,7 @@ A migration `0005_mglabs_os_crm.sql` é **aditiva**: cria as tabelas novas (`crm
 
 ## IA opcional (Gemini)
 
-Defina `GEMINI_API_KEY` (só servidor). Recursos: variações de mensagem, resumo da oportunidade, próxima ação e sugestão de tarefas — sempre sugestões editáveis. Sem a chave, nada quebra. Limite diário (`GEMINI_DAILY_LIMIT`), erros 429/503 viram mensagem clara, logs sem conteúdo. **Privacidade:** o plano gratuito do Gemini pode usar os dados enviados para melhorar produtos; o app envia o mínimo (sem nomes de contatos, telefones, e-mails, links, valores ou histórico completo) e exige autorização explícita. Confirme o modelo (`GEMINI_MODEL`) e as cotas da sua conta em aistudio.google.com/rate-limit.
+**Ativar (grátis):** crie uma chave em aistudio.google.com/apikey, adicione `GEMINI_API_KEY` nas variáveis de ambiente da Vercel (Production), faça um novo deploy e use **Configurações → Testar conexão**. A chave fica só no servidor. Recursos: variações de mensagem, refino de texto (encurtar, informal…), análise da resposta do cliente com rascunhos de resposta, resumo da oportunidade, próxima ação e sugestão de tarefas — sempre sugestões editáveis. Sem a chave, nada quebra. Limite diário (`GEMINI_DAILY_LIMIT`), erros 429/503 viram mensagem clara, logs sem conteúdo. **Privacidade:** o plano gratuito do Gemini pode usar os dados enviados para melhorar produtos; o app envia o mínimo (sem nomes de contatos, telefones, e-mails, links, valores ou histórico completo) e exige autorização explícita. Confirme o modelo (`GEMINI_MODEL`) e as cotas da sua conta em aistudio.google.com/rate-limit.
 
 ## Claude Code via MCP
 

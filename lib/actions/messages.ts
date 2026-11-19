@@ -1,6 +1,7 @@
 "use server";
 
 import { act } from "@/lib/actions/helpers";
+import { assertWrite } from "@/lib/services/ctx";
 import {
   deleteTemplate,
   messageContext,
@@ -16,6 +17,8 @@ import {
   type ReplyInput,
   type TemplateInput,
 } from "@/lib/services/messages";
+import { advanceDeal } from "@/lib/services/deals";
+import { outreachQueue } from "@/lib/services/outreach";
 
 export async function messageContextAction(input: { dealId?: string | null; companyId?: string | null; contactId?: string | null }) {
   return act((ctx) => messageContext(ctx, input));
@@ -51,4 +54,16 @@ export async function recordReplyAction(input: ReplyInput) {
 }
 export async function scheduleFollowUpAction(input: FollowUpInput) {
   return act((ctx) => scheduleMessageFollowUp(ctx, input));
+}
+
+export async function outreachQueueAction() {
+  return act((ctx) => outreachQueue(ctx));
+}
+/** Só avança (nunca volta etapa nem mexe em negócio fechado). */
+export async function advanceDealAction(dealId: string, stage: string) {
+  return act(async (ctx) => {
+    assertWrite(ctx);
+    await advanceDeal(ctx, dealId, stage);
+    return { ok: true as const };
+  });
 }

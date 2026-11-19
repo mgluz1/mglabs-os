@@ -1,7 +1,8 @@
 "use server";
 
-import { aiConfig, aiUsageToday, AiError } from "@/lib/ai/gemini";
-import { generateMessageVariants, suggestNextAction, suggestTasks, summarizeDeal } from "@/lib/ai/features";
+import { aiConfig, aiUsageToday, AiError, testGemini } from "@/lib/ai/gemini";
+import { analyzeClientReply, generateMessageVariants, refineMessage, suggestNextAction, suggestTasks, summarizeDeal } from "@/lib/ai/features";
+import type { RefineActionId } from "@/lib/refine-actions";
 import { act, UserError } from "@/lib/actions/helpers";
 import { requireCtx } from "@/lib/services/ctx";
 
@@ -40,4 +41,16 @@ export async function nextActionAction(dealId: string, consent: boolean) {
 }
 export async function suggestTasksAction(dealId: string, consent: boolean) {
   return wrap((ctx) => suggestTasks(ctx, dealId, consent));
+}
+
+/** Assistente de resposta: o texto do cliente é mascarado no servidor antes de ir ao Gemini. */
+export async function analyzeReplyAction(input: { dealId?: string | null; companyId?: string | null; contactId?: string | null; reply: string; consent: boolean }) {
+  return wrap((ctx) => analyzeClientReply(ctx, { ...input, sender: process.env.MEU_NOME || "Miguel" }));
+}
+export async function refineMessageAction(input: { text: string; action: RefineActionId; consent: boolean }) {
+  return wrap((ctx) => refineMessage(ctx, input));
+}
+/** "Testar conexão" em Configurações: 1 chamada mínima, sem dados do CRM. */
+export async function testGeminiAction() {
+  return act((ctx) => testGemini(ctx));
 }

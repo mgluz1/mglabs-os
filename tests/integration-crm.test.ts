@@ -264,4 +264,50 @@ run("CRM de ponta a ponta (Postgres real)", () => {
     expect(quotaAttempts.filter(Boolean)).toHaveLength(2);
     expect((await gemini.aiUsageToday(owner)).calls).toBe(2);
   });
+
+  it("ordena por urgência, ignora opt-out, sem contato e enviados há pouco; próximo avança após registrar envio", async () => {
+    process.env.DATABASE_URL = url;
+    const { db } = await import("@/lib/db");
+    const { workspaces, workspaceMembers } = await import("@/db/schema");
+    const ctxm = await import("@/lib/services/ctx");
+    const [ws] = await db.insert(workspaces).values({ name: "fila-" + randomUUID().slice(0, 6) }).returning();
+    await db.insert(workspaceMembers).values({ workspaceId: ws.id, userId: "u-fila", email: "f@t.com", role: "owner" });
+    await ctxm.seedWorkspaceDefaults(ws.id);
+    const ctx: import("@/lib/services/ctx").Ctx = { workspaceId: ws.id, userId: "u-fila", email: "f@t.com", role: "owner", actor: "user", scope: "write" };
+    const deals = await import("@/lib/services/deals");
+    const messages = await import("@/lib/services/messages");
+    const optout = await import("@/lib/services/optout");
+    const { outreachQueue } = await import("@/lib/services/outreach");
+
+    const mk = (name: string, p: string | null) => deals.createDealWithCompany(ctx, { company: { name, phone: p }, deal: { title: `Site ${name}` } });
+    const fresh = await mk("Novo Lead", phone());
+    const replied = await mk("Respondeu", phone());
+    const sentNow = await mk("Enviado Agora", phone());
+    const noContact = await mk("Sem Contato", null);
+    const stopped = await mk("Pediu Parar", phone());
+
+    await messages.recordClientReply(ctx, { companyId: replied.companyId, dealId: replied.id, channel: "whatsapp", summary: "Quer valores", followUpDays: 1 });
+    await messages.registerSent(ctx, { draft: { companyId: sentNow.companyId, dealId: sentNow.id, objective: "primeiro_contato", body: "Oi! Tudo bem?", channel: "whatsapp" }, channel: "whatsapp" });
+    await optout.registerOptOut(ctx, { companyId: stopped.companyId, reason: "teste" });
+
+    const q = await outreachQueue(ctx);
+    const names = q.map((i) => i.companyName);
+    expect(names[0]).toBe("Respondeu");
+    expect(q[0]).toMatchObject({ objective: "resposta_interesse", awaitingReply: true });
+    expect(names).toContain("Novo Lead");
+    expect(names).not.toContain("Enviado Agora");
+    expect(names).not.toContain("Sem Contato");
+    expect(names).not.toContain("Pediu Parar");
+    expect(q.find((i) => i.dealId === fresh.id)?.objective).toBe("primeiro_contato");
+    void noContact;
+
+    // depois de responder ao cliente, ele sai do topo (envio recente)
+    await messages.registerSent(ctx, { draft: { companyId: replied.companyId, dealId: replied.id, objective: "resposta_interesse", body: "Claro, te mando agora", channel: "whatsapp" }, channel: "whatsapp" });
+    expect((await outreachQueue(ctx)).map((i) => i.companyName)).not.toContain("Respondeu");
+
+    // outro workspace não enxerga nada
+    const [ws2] = await db.insert(workspaces).values({ name: "fila2-" + randomUUID().slice(0, 6) }).returning();
+    expect(await outreachQueue({ ...ctx, workspaceId: ws2.id })).toEqual([]);
+  });
 });
+

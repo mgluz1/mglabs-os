@@ -9,6 +9,7 @@ import { Gate } from "@/components/shell/gate";
 import { Badge, Page, PageHeader, PendingNote, SectionCard } from "@/components/ui/kit";
 import { workspaceMembers, workspaces } from "@/db/schema";
 import { aiStatusAction } from "@/lib/actions/ai";
+import { GeminiSetupGuide, GeminiTestButton } from "@/components/settings/gemini-setup";
 import { ROLES, labelOf } from "@/lib/config/crm";
 import { db } from "@/lib/db";
 import { assertModule, canModule } from "@/lib/services/ctx";
@@ -82,8 +83,13 @@ export default function ConfiguracoesPage({ searchParams }: PageProps<"/configur
                       <div className="flex justify-between"><dt className="text-muted">Modelo</dt><dd className="font-mono text-xs">{ai.model}</dd></div>
                       <div className="flex justify-between"><dt className="text-muted">Uso hoje</dt><dd>{ai.usedToday} / {ai.dailyLimit} chamadas</dd></div>
                     </dl>
-                    <p className="mt-3 text-xs text-muted">A chave fica só no servidor. Defina GEMINI_API_KEY (e, se quiser, GEMINI_MODEL e GEMINI_DAILY_LIMIT) nas variáveis de ambiente. Confirme o modelo e as cotas gratuitas da sua conta em aistudio.google.com/rate-limit. Sem a chave, o app inteiro segue funcionando com modelos e escrita manual.</p>
-                  </SectionCard>
+                    {ai.enabled ? (
+                      <p className="mt-3 text-xs text-muted">A chave fica só no servidor (nunca vai para o navegador). Opcional: GEMINI_MODEL e GEMINI_DAILY_LIMIT. Cotas do plano gratuito em aistudio.google.com/rate-limit. Se o modelo configurado não existir na conta, o app procura outro modelo Flash automaticamente.</p>
+                    ) : (
+                      <div className="mt-3 space-y-2"><p className="text-sm font-medium">Como ativar (2 minutos)</p><GeminiSetupGuide /><p className="text-xs text-muted">Sem a chave, o app inteiro segue funcionando com modelos e escrita manual.</p></div>
+                    )}
+                    <GeminiTestButton />
+                    </SectionCard>
 
                   <SectionCard title="Claude Code (MCP)" className="lg:col-span-2"><TokensPanel tokens={tokens} mcpUrl={`${proto}://${host}/api/mcp`} /></SectionCard>
 
