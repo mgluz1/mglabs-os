@@ -9,7 +9,7 @@ import { leadDetailAction, openInStudioAction, optOutAction, prospectStateAction
 import { badgesFor } from "@/components/lead/badges";
 import { CATEGORY_ICON, ScoreRing, Stars } from "@/components/radar/ui";
 import { addPlaceToCrmAction, moveDealAction } from "@/lib/actions/crm";
-import { getCategory } from "@/lib/config/categories";
+import { categoryLabel } from "@/lib/config/categories";
 import { LOST_REASONS, STAGE_DEFS } from "@/lib/config/crm";
 import { fmtDateTime } from "@/lib/dates";
 import { distanceM, type LatLng } from "@/lib/geo";
@@ -73,7 +73,6 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center, offer }: 
       </Shell>
     );
 
-  const cat = getCategory(place.category ?? "");
   const CatIcon = CATEGORY_ICON[place.category ?? ""] ?? Globe;
   // celular é "provável WhatsApp": só vira "confirmado" com evidência (link wa.me no site da empresa)
   const wa = place.contacts.find((c) => c.kind === "whatsapp" && c.confirmed) ?? place.contacts.find((c) => c.kind === "whatsapp") ?? place.contacts.find((c) => c.kind === "phone" && parseBrPhone(c.value)?.mobile);
@@ -130,7 +129,7 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center, offer }: 
         </header>
 
         <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted">
-          <span className="inline-flex items-center gap-1"><CatIcon className="h-3.5 w-3.5" aria-hidden />{cat?.label ?? place.category}</span>
+          <span className="inline-flex items-center gap-1"><CatIcon className="h-3.5 w-3.5" aria-hidden />{categoryLabel(place.category)}</span>
           {(place.neighborhood || place.city) && <span>{[place.neighborhood, place.city].filter(Boolean).join(", ")}</span>}
           {dist != null && <span>{(dist / 1000).toFixed(1).replace(".", ",")} km do centro da busca</span>}
           <a href={`https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}#map=19/${place.lat}/${place.lng}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">

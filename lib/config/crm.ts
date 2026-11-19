@@ -36,10 +36,11 @@ export const sourceLabel = (id: string | null | undefined) => SOURCES.find((s) =
 
 export const LOST_REASONS = ["Sem orçamento", "Escolheu outro fornecedor", "Sem resposta", "Não é o momento", "Já tem solução", "Pediu para não ser contatado", "Fora do perfil", "Outro"] as const;
 
-export const SERVICE_TYPES = ["Landing page", "Site institucional", "Site + agendamento", "Automação de WhatsApp", "Projeto sob medida", "Manutenção / suporte"] as const;
+export const SERVICE_TYPES = ["Site profissional", "Serviços MGLABS", "Site institucional", "Landing page", "Site + agendamento", "Automação de WhatsApp", "Projeto sob medida", "Manutenção / suporte"] as const;
 
 export const OFFER_TO_SERVICE = {
-  site: "Site institucional",
+  site: "Site profissional",
+  servicos_mglabs: "Serviços MGLABS",
   agendamento: "Site + agendamento",
   landing: "Landing page",
   automacao_whatsapp: "Automação de WhatsApp",
@@ -84,6 +85,13 @@ export const MESSAGE_TONES = [
   { id: "profissional", label: "Profissional" },
 ] as const;
 export type MessageToneId = (typeof MESSAGE_TONES)[number]["id"];
+
+export const MESSAGE_LENGTHS = [
+  { id: "curta", label: "Curta", hint: "2–3 frases rápidas de WhatsApp" },
+  { id: "media", label: "Média", hint: "3–4 frases com contexto claro" },
+  { id: "detalhada", label: "Detalhada", hint: "Explicação completa e próximo passo" },
+] as const;
+export type MessageLengthId = (typeof MESSAGE_LENGTHS)[number]["id"];
 
 export const PROJECT_PHASES = [
   { id: "briefing", label: "Briefing" },

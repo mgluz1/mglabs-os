@@ -1,0 +1,1 @@
+ALTER TABLE "crm_message_templates" ADD COLUMN "favorite" boolean DEFAULT false NOT NULL;

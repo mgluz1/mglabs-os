@@ -26,9 +26,18 @@ BBOX = dict(xmin=-49.50, xmax=-49.05, ymin=-16.95, ymax=-16.50)
 TERMS = {
     "barbearia": ["barber"],
     "salao": ["beauty_salon", "hair_salon", "nail_salon", "skin_care_and_makeup", "eyebrow_service", "eyelash_service"],
-    "academia": ["gym", "fitness_studio", "martial_arts_club", "fitness_trainer"],
+    "dentista": ["dentist", "dental_clinic", "orthodontist", "cosmetic_dentist", "endodontist"],
+    "estetica": ["medical_spa", "skin_care_and_makeup", "day_spa", "spa", "eyebrow_service", "eyelash_service", "laser_hair_removal_service"],
+    "petshop": ["pet_store", "pet_groomer", "veterinarian", "animal_hospital", "pet_services"],
+    "academia": ["gym", "fitness_studio", "martial_arts_club", "fitness_trainer", "pilates_studio", "yoga_studio"],
     "restaurante": ["restaurant", "fast_food_restaurant"],
-    "clinica": ["outpatient_care_facility", "specialized_health_care", "behavioral_or_mental_health_clinic", "vision_or_eye_care_clinic", "pediatric_clinic", "medical_spa"],
+    "pizzaria": ["pizza_restaurant", "burger_restaurant", "fast_food_restaurant"],
+    "clinica": ["outpatient_care_facility", "specialized_health_care", "behavioral_or_mental_health_clinic", "vision_or_eye_care_clinic", "pediatric_clinic", "physical_therapy"],
+    "cafeteria": ["cafe", "coffee_shop", "bakery", "pastry_shop", "dessert_shop"],
+    "oficina": ["automotive_repair", "auto_repair", "car_wash", "auto_detailing", "tire_shop"],
+    "imobiliaria": ["real_estate_agent", "real_estate_agency", "commercial_real_estate", "property_management"],
+    "escritorio": ["lawyer", "legal_services", "accountant", "accounting_service", "tax_service"],
+    "comercio": ["clothing_store", "shoe_store", "optician", "furniture_store", "jewelry_store", "home_goods_store"],
 }
 ALL_TERMS = sorted({t for v in TERMS.values() for t in v})
 

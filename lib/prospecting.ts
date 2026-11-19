@@ -97,7 +97,10 @@ export function evaluateProspectCandidate(
     reasons.push("Encaixe com agendamento");
   } else if ((opts.offer === "site" || opts.offer === "landing") && (place.siteType === "sem_site" || place.siteType === "so_rede_social" || place.viewport === false)) {
     priority += 8;
-    reasons.push("Encaixe com site/landing");
+    reasons.push("Encaixe com site profissional");
+  } else if (opts.offer === "servicos_mglabs" && ((cat?.agenda && place.hasBooking === false) || cap.hasMobile || place.siteType === "sem_site" || place.siteType === "so_rede_social")) {
+    priority += 8;
+    reasons.push("Encaixe com Serviços MGLABS");
   } else if (opts.offer === "automacao_whatsapp" && cap.hasMobile) {
     priority += 6;
     reasons.push("Encaixe com automação WhatsApp");

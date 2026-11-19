@@ -19,6 +19,8 @@ type Props = {
   center: LatLng;
   /** Muda só quando o mapa deve se mover (troca de cidade, busca aberta). */
   panTarget: LatLng;
+  /** Foco opcional quando um lead é escolhido na lista. */
+  focusTarget?: LatLng | null;
   radiusM: number;
   places: RadarPlace[];
   selectedId: string | null;
@@ -72,7 +74,7 @@ function circlePolygon(c: LatLng, radiusM: number, steps = 128): GeoJSON.Feature
   return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } };
 }
 
-export function RadarMap({ center, panTarget, radiusM, places, selectedId, category, leftInset = 0, compact = false, onPickCenter, onSelect }: Props) {
+export function RadarMap({ center, panTarget, focusTarget, radiusM, places, selectedId, category, leftInset = 0, compact = false, onPickCenter, onSelect }: Props) {
   const mapRef = useRef<MapRef | null>(null);
   const theme = useTheme();
   const dark = theme === "dark";
@@ -119,6 +121,7 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, categ
       cursor="crosshair"
     >
       <FlyTo center={panTarget} radiusM={radiusM} leftInset={leftInset} />
+      <FocusPoint target={focusTarget ?? null} leftInset={leftInset} />
       {!compact && <NavigationControl position="bottom-right" showCompass={false} />}
       <AttributionControl position={compact ? "top-right" : "bottom-right"} compact={compact} customAttribution={ATTRIBUTION} />
 
@@ -211,5 +214,20 @@ function FlyTo({ center, radiusM, leftInset }: { center: LatLng; radiusM: number
     // o enquadramento segue o raio só quando o centro muda, para não brigar com o zoom manual
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, center]);
+  return null;
+}
+
+/** Centraliza suavemente quando o usuário seleciona uma empresa pela lista. */
+function FocusPoint({ target, leftInset }: { target: LatLng | null; leftInset: number }) {
+  const { current: map } = useMap();
+  useEffect(() => {
+    if (!map || !target) return;
+    map.easeTo({
+      center: [target.lng, target.lat],
+      zoom: Math.max(map.getZoom(), 14.5),
+      padding: leftInset > 0 ? { top: 40, bottom: 40, left: leftInset + 20, right: leftInset + 20 } : { top: 24, bottom: 24, left: 24, right: 24 },
+      duration: 500,
+    });
+  }, [map, target, leftInset]);
   return null;
 }

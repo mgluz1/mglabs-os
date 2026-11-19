@@ -1,18 +1,18 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
-import { crmActivities, crmCompanies, crmContacts, crmDeals, crmMessageDrafts, crmMessageTemplates, crmTasks } from "@/db/schema";
+import { crmActivities, crmCompanies, crmContacts, crmDeals, crmMessageDrafts, crmMessageTemplates, crmStages, crmTasks } from "@/db/schema";
 import { MESSAGE_OBJECTIVES, MESSAGE_TONES, SOURCES } from "@/lib/config/crm";
+import { addDays } from "@/lib/dates";
 import { db } from "@/lib/db";
-import { DEFAULT_SERVICE, OPT_OUT_LINE, COLD_OBJECTIVES, greetingVars, renderTemplate, withOptOut, type TemplateVars } from "@/lib/messages";
+import { COLD_OBJECTIVES, DEFAULT_SERVICE, OPT_OUT_LINE, greetingVars, renderTemplate, withOptOut, type TemplateVars } from "@/lib/messages";
 import { parseBrPhone, waLink } from "@/lib/phone";
 import { placeById } from "@/lib/queries";
 import { signalsFor } from "@/lib/radar-signals";
-import { addDays } from "@/lib/dates";
+import { NotFoundError, ValidationError, assertModule, assertWrite, audit, type Ctx } from "@/lib/services/ctx";
 import { advanceDeal } from "@/lib/services/deals";
-import { assertModule, assertWrite, audit, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { contactBlock } from "@/lib/services/optout";
 import { optStr, parse, reqStr } from "@/lib/services/util";
 
@@ -28,6 +28,7 @@ export const templateInput = z.object({
   tone: z.enum(toneIds).nullish().transform((v) => v ?? null),
   channel: z.enum(["whatsapp", "email", "instagram"]).default("whatsapp"),
   body: reqStr(3000),
+  favorite: z.boolean().optional(),
 });
 export type TemplateInput = z.input<typeof templateInput>;
 
@@ -37,7 +38,7 @@ export async function listTemplates(ctx: Ctx, f: { objective?: string } = {}) {
     .select()
     .from(crmMessageTemplates)
     .where(and(eq(crmMessageTemplates.workspaceId, ctx.workspaceId), eq(crmMessageTemplates.active, true), f.objective ? eq(crmMessageTemplates.objective, f.objective) : undefined))
-    .orderBy(crmMessageTemplates.objective, crmMessageTemplates.name);
+    .orderBy(desc(crmMessageTemplates.favorite), crmMessageTemplates.objective, crmMessageTemplates.name);
 }
 
 export async function saveTemplate(ctx: Ctx, id: string | null, raw: TemplateInput) {
@@ -45,7 +46,10 @@ export async function saveTemplate(ctx: Ctx, id: string | null, raw: TemplateInp
   assertModule(ctx, "comercial");
   const i = parse(templateInput, raw);
   if (!id) {
-    const [row] = await db.insert(crmMessageTemplates).values({ ...i, workspaceId: ctx.workspaceId }).returning();
+    const [row] = await db
+      .insert(crmMessageTemplates)
+      .values({ ...i, favorite: i.favorite ?? false, workspaceId: ctx.workspaceId })
+      .returning();
     return row;
   }
   // Versionado: cada edição incrementa a versão do modelo.
@@ -53,9 +57,26 @@ export async function saveTemplate(ctx: Ctx, id: string | null, raw: TemplateInp
   if (!cur) throw new NotFoundError("Modelo");
   const [row] = await db
     .update(crmMessageTemplates)
-    .set({ ...i, version: cur.body === i.body ? cur.version : cur.version + 1, updatedAt: new Date() })
+    .set({
+      ...i,
+      favorite: i.favorite ?? cur.favorite,
+      version: cur.body === i.body ? cur.version : cur.version + 1,
+      updatedAt: new Date(),
+    })
     .where(eq(crmMessageTemplates.id, id))
     .returning();
+  return row;
+}
+
+export async function toggleTemplateFavorite(ctx: Ctx, id: string, favorite: boolean) {
+  assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  const [row] = await db
+    .update(crmMessageTemplates)
+    .set({ favorite, updatedAt: new Date() })
+    .where(and(eq(crmMessageTemplates.id, id), eq(crmMessageTemplates.workspaceId, ctx.workspaceId)))
+    .returning();
+  if (!row) throw new NotFoundError("Modelo");
   return row;
 }
 
@@ -67,12 +88,44 @@ export async function deleteTemplate(ctx: Ctx, id: string) {
 
 // ---------- contexto verificado do negócio ----------
 
-export type Recipient = { id: string; label: string; kind: "whatsapp" | "telefone" | "email" | "instagram"; value: string; waDigits: string | null; mobile: boolean; contactId: string | null; contactName: string | null };
+export type Recipient = {
+  id: string;
+  label: string;
+  kind: "whatsapp" | "telefone" | "email" | "instagram";
+  value: string;
+  waDigits: string | null;
+  mobile: boolean;
+  contactId: string | null;
+  contactName: string | null;
+};
+
+export type ContextHistoryItem = {
+  id: string;
+  kind: string;
+  channel: string | null;
+  content: string | null;
+  occurredAt: Date;
+};
+
+export type ContextPresence = {
+  website: string | null;
+  instagram: string | null;
+  siteType: string | null;
+  psiPerformance: number | null;
+  hasBooking: boolean | null;
+  viewport: boolean | null;
+  auditStatus: string | null;
+};
 
 export type MessageContext = {
   companyId: string;
   companyName: string;
   dealId: string | null;
+  dealTitle: string | null;
+  dealStageKey: string | null;
+  dealStageLabel: string | null;
+  nextStep: string | null;
+  nextStepAt: Date | null;
   category: string | null;
   city: string | null;
   contactId: string | null;
@@ -82,6 +135,8 @@ export type MessageContext = {
   origin: string | null;
   /** Fatos auditados pelo Radar (somente leitura). */
   facts: string[];
+  presence: ContextPresence;
+  recentHistory: ContextHistoryItem[];
   recipients: Recipient[];
   blocked: boolean;
   blockedReason: string | null;
@@ -92,31 +147,85 @@ export async function messageContext(ctx: Ctx, input: { dealId?: string | null; 
   assertModule(ctx, "comercial");
   let companyId = input.companyId ?? null;
   const dealId = input.dealId ?? null;
+  let dealTitle: string | null = null;
+  let dealStageKey: string | null = null;
+  let dealStageLabel: string | null = null;
+  let nextStep: string | null = null;
+  let nextStepAt: Date | null = null;
   let serviceType: string | null = null;
   let primaryContact: string | null = input.contactId ?? null;
+
   if (dealId) {
-    const [d] = await db.select().from(crmDeals).where(and(eq(crmDeals.id, dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
+    const [d] = await db
+      .select({
+        deal: crmDeals,
+        stageKey: crmStages.key,
+        stageLabel: crmStages.label,
+      })
+      .from(crmDeals)
+      .leftJoin(crmStages, eq(crmStages.id, crmDeals.stageId))
+      .where(and(eq(crmDeals.id, dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
     if (!d) throw new NotFoundError("Oportunidade");
-    companyId = d.companyId;
-    serviceType = d.serviceType;
-    primaryContact ??= d.primaryContactId;
+    companyId = d.deal.companyId;
+    serviceType = d.deal.serviceType;
+    primaryContact ??= d.deal.primaryContactId;
+    dealTitle = d.deal.title;
+    dealStageKey = d.stageKey;
+    dealStageLabel = d.stageLabel;
+    nextStep = d.deal.nextStep;
+    nextStepAt = d.deal.nextStepAt;
   }
+
   if (!companyId) throw new ValidationError("Escolha uma empresa ou oportunidade.");
   const [company] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.id, companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
   if (!company) throw new NotFoundError("Empresa");
-  const contacts = await db.select().from(crmContacts).where(eq(crmContacts.companyId, company.id)).orderBy(crmContacts.name);
+
+  const [contacts, historyRows] = await Promise.all([
+    db.select().from(crmContacts).where(eq(crmContacts.companyId, company.id)).orderBy(crmContacts.name),
+    db
+      .select({
+        id: crmActivities.id,
+        kind: crmActivities.kind,
+        channel: crmActivities.channel,
+        content: crmActivities.content,
+        occurredAt: crmActivities.occurredAt,
+      })
+      .from(crmActivities)
+      .where(
+        and(
+          eq(crmActivities.workspaceId, ctx.workspaceId),
+          dealId ? or(eq(crmActivities.dealId, dealId), eq(crmActivities.companyId, company.id)) : eq(crmActivities.companyId, company.id),
+        ),
+      )
+      .orderBy(desc(crmActivities.occurredAt))
+      .limit(8),
+  ]);
   const contact = contacts.find((c) => c.id === primaryContact) ?? null;
 
   const recipients: Recipient[] = [];
   const add = (r: Omit<Recipient, "id" | "waDigits" | "mobile">, phone?: string | null) => {
     const p = parseBrPhone(phone ?? r.value);
-    recipients.push({ ...r, id: `${r.kind}:${r.value}:${r.contactId ?? ""}`, waDigits: r.kind === "whatsapp" || r.kind === "telefone" ? (p?.mobile ? p.digits : null) : null, mobile: !!p?.mobile });
+    recipients.push({
+      ...r,
+      id: `${r.kind}:${r.value}:${r.contactId ?? ""}`,
+      waDigits: r.kind === "whatsapp" || r.kind === "telefone" ? (p?.mobile ? p.digits : null) : null,
+      mobile: !!p?.mobile,
+    });
   };
   const addPhone = (value: string | null, who: { id: string | null; name: string | null }, whatsapp = false) => {
     if (!value) return;
     const p = parseBrPhone(value);
     const mobile = !!p?.mobile || whatsapp;
-    add({ label: `${who.name ?? company.name} · ${p?.display ?? value}${p?.mobile ? " (celular — WhatsApp não confirmado)" : whatsapp ? " (WhatsApp informado)" : " (fixo)"}`, kind: mobile ? "whatsapp" : "telefone", value, contactId: who.id, contactName: who.name }, value);
+    add(
+      {
+        label: `${who.name ?? company.name} · ${p?.display ?? value}${p?.mobile ? " (celular — WhatsApp não confirmado)" : whatsapp ? " (WhatsApp informado)" : " (fixo)"}`,
+        kind: mobile ? "whatsapp" : "telefone",
+        value,
+        contactId: who.id,
+        contactName: who.name,
+      },
+      value,
+    );
   };
   for (const c of contacts) {
     addPhone(c.whatsapp, { id: c.id, name: c.name }, true);
@@ -130,22 +239,67 @@ export async function messageContext(ctx: Ctx, input: { dealId?: string | null; 
 
   let facts: string[] = [];
   let origin: string | null = null;
+  let presence: ContextPresence = {
+    website: company.website,
+    instagram: company.instagram,
+    siteType: null,
+    psiPerformance: null,
+    hasBooking: null,
+    viewport: null,
+    auditStatus: null,
+  };
   if (company.placeId) {
     const place = await placeById(company.placeId);
     if (place) {
       facts = signalsFor(place);
       origin = place.source === "overture" ? `Encontrei a ${company.name} ao mapear negócios${company.city ? ` de ${company.city}` : " da região"}` : null;
+      presence = {
+        website: company.website ?? place.googleWebsite,
+        instagram: company.instagram ?? place.contacts.find((c) => c.kind === "instagram")?.value ?? null,
+        siteType: place.siteType,
+        psiPerformance: place.psiPerformance,
+        hasBooking: place.hasBooking,
+        viewport: place.viewport,
+        auditStatus: place.auditStatus,
+      };
     }
   }
   const block = await contactBlock(ctx, { companyId: company.id, contactId: contact?.id ?? null });
   return {
-    companyId: company.id, companyName: company.name, dealId, category: company.category, city: company.city, contactId: contact?.id ?? null, contactName: contact?.name ?? null,
-    source: company.source, origin, facts, recipients: block.blocked ? [] : recipients, blocked: block.blocked, blockedReason: block.reason, serviceType,
+    companyId: company.id,
+    companyName: company.name,
+    dealId,
+    dealTitle,
+    dealStageKey,
+    dealStageLabel,
+    nextStep,
+    nextStepAt,
+    category: company.category,
+    city: company.city,
+    contactId: contact?.id ?? null,
+    contactName: contact?.name ?? null,
+    source: company.source,
+    origin,
+    facts,
+    presence,
+    recentHistory: historyRows,
+    recipients: block.blocked ? [] : recipients,
+    blocked: block.blocked,
+    blockedReason: block.reason,
+    serviceType,
   };
 }
 
 export function varsFor(mc: MessageContext, extra: { sender: string; service?: string | null; observation?: string | null }): TemplateVars {
-  return { empresa: mc.companyName, contato: greetingVars(mc.contactName), remetente: extra.sender, servico: extra.service || mc.serviceType || DEFAULT_SERVICE, cidade: mc.city, observacao: extra.observation ?? null, origem: mc.origin };
+  return {
+    empresa: mc.companyName,
+    contato: greetingVars(mc.contactName),
+    remetente: extra.sender,
+    servico: extra.service || mc.serviceType || DEFAULT_SERVICE,
+    cidade: mc.city,
+    observacao: extra.observation ?? null,
+    origem: mc.origin,
+  };
 }
 
 export function buildFromTemplate(body: string, vars: TemplateVars, objective: string, optOut: boolean): string {
@@ -202,8 +356,22 @@ export async function saveDraft(ctx: Ctx, raw: DraftInput, draftId?: string | nu
 export async function listDrafts(ctx: Ctx, f: { companyId?: string; dealId?: string; limit?: number } = {}) {
   assertModule(ctx, "comercial");
   return db
-    .select()
+    .select({
+      id: crmMessageDrafts.id,
+      dealId: crmMessageDrafts.dealId,
+      companyId: crmMessageDrafts.companyId,
+      companyName: crmCompanies.name,
+      objective: crmMessageDrafts.objective,
+      service: crmMessageDrafts.service,
+      channel: crmMessageDrafts.channel,
+      body: crmMessageDrafts.body,
+      origin: crmMessageDrafts.origin,
+      status: crmMessageDrafts.status,
+      createdAt: crmMessageDrafts.createdAt,
+      sentAt: crmMessageDrafts.sentAt,
+    })
     .from(crmMessageDrafts)
+    .leftJoin(crmCompanies, eq(crmCompanies.id, crmMessageDrafts.companyId))
     .where(and(eq(crmMessageDrafts.workspaceId, ctx.workspaceId), f.companyId ? eq(crmMessageDrafts.companyId, f.companyId) : undefined, f.dealId ? eq(crmMessageDrafts.dealId, f.dealId) : undefined))
     .orderBy(desc(crmMessageDrafts.createdAt))
     .limit(f.limit ?? 30);
@@ -225,7 +393,14 @@ export async function whatsappLink(ctx: Ctx, input: { companyId: string; contact
  */
 export async function registerSent(
   ctx: Ctx,
-  input: { draft: DraftInput; draftId?: string | null; idempotencyKey?: string | null; channel: "whatsapp" | "email" | "instagram" | "ligacao" },
+  input: {
+    draft: DraftInput;
+    draftId?: string | null;
+    idempotencyKey?: string | null;
+    channel: "whatsapp" | "email" | "instagram" | "ligacao";
+    followUpDays?: number | null;
+    followUpTitle?: string | null;
+  },
 ) {
   assertWrite(ctx);
   assertModule(ctx, "comercial");
@@ -234,6 +409,8 @@ export async function registerSent(
   if (block.blocked) throw new ValidationError(block.reason ?? "Contato bloqueado.");
   const idemKey = input.idempotencyKey?.trim() ? input.idempotencyKey.trim().slice(0, 120) : null;
   const origin = ctx.actor === "mcp" ? "mcp" : i.origin;
+  const followUpDays = input.followUpDays == null ? 3 : Math.max(0, Math.min(30, Math.round(input.followUpDays)));
+  const followUpTitle = (input.followUpTitle ?? "").trim().slice(0, 180) || "Follow-up da mensagem enviada";
   const now = new Date();
 
   const { draft, alreadySent } = await db.transaction(async (tx) => {
@@ -296,45 +473,41 @@ export async function registerSent(
       await tx.update(crmContacts).set({ lastContactAt: now }).where(eq(crmContacts.id, row.contactId));
     }
 
-    if (row.dealId) {
-      const [d] = await tx
-        .select()
-        .from(crmDeals)
-        .where(and(eq(crmDeals.id, row.dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
-      if (d) {
-        const followAt = addDays(now, 3);
+    if (followUpDays > 0 && (row.dealId || row.companyId)) {
+      const followAt = addDays(now, followUpDays);
+      if (row.dealId) {
         await tx
           .update(crmDeals)
-          .set({ nextStep: "Follow-up da mensagem enviada", nextStepAt: followAt, lastActivityAt: now, updatedAt: now })
-          .where(eq(crmDeals.id, d.id));
-        const [task] = await tx
-          .insert(crmTasks)
-          .values({
-            workspaceId: ctx.workspaceId,
-            title: "Follow-up da mensagem enviada",
-            dueAt: followAt,
-            dealId: d.id,
-            companyId: d.companyId,
-            priority: "media",
-            source: "automacao",
-            dedupeKey: `followup:${row.id}`,
-            createdBy: ctx.userId,
-          })
-          .onConflictDoNothing()
-          .returning();
-        if (task) {
-          await tx.insert(crmActivities).values({
-            workspaceId: ctx.workspaceId,
-            dealId: d.id,
-            companyId: d.companyId,
-            kind: "tarefa",
-            content: `Tarefa criada: ${task.title}`,
-            meta: { taskId: task.id },
-            authorId: ctx.userId,
-            authorKind: ctx.actor,
-            occurredAt: now,
-          });
-        }
+          .set({ nextStep: followUpTitle, nextStepAt: followAt, lastActivityAt: now, updatedAt: now })
+          .where(and(eq(crmDeals.id, row.dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
+      }
+      const [task] = await tx
+        .insert(crmTasks)
+        .values({
+          workspaceId: ctx.workspaceId,
+          title: followUpTitle,
+          dueAt: followAt,
+          dealId: row.dealId,
+          companyId: row.companyId,
+          priority: "media",
+          source: "automacao",
+          dedupeKey: `followup:${row.id}`,
+          createdBy: ctx.userId,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (task) {
+        await tx.insert(crmActivities).values({
+          workspaceId: ctx.workspaceId,
+          dealId: row.dealId,
+          companyId: row.companyId,
+          kind: "tarefa",
+          content: `Tarefa criada: ${task.title}`,
+          meta: { taskId: task.id },
+          authorId: ctx.userId,
+          authorKind: ctx.actor,
+          occurredAt: now,
+        });
       }
     }
 
@@ -345,9 +518,136 @@ export async function registerSent(
     if (draft.dealId && draft.objective === "primeiro_contato") {
       await advanceDeal(ctx, draft.dealId, "primeiro_contato").catch(() => null);
     }
-    await audit(ctx, "send", "message_draft", draft.id, { channel: input.channel });
+    await audit(ctx, "send", "message_draft", draft.id, { channel: input.channel, followUpDays });
   }
   return draft;
+}
+
+const replyInput = z.object({
+  companyId: z.string().uuid(),
+  dealId: z.string().uuid().nullish().transform((v) => v ?? null),
+  contactId: z.string().uuid().nullish().transform((v) => v ?? null),
+  channel: z.enum(["whatsapp", "email", "instagram", "ligacao"]).default("whatsapp"),
+  summary: reqStr(1500),
+  advanceToConversation: z.boolean().default(true),
+  followUpDays: z.number().int().min(0).max(30).default(2),
+  followUpTitle: optStr(180),
+});
+export type ReplyInput = z.input<typeof replyInput>;
+
+/** Registra resposta do cliente direto do Estúdio, avança para conversa (opcional) e agenda retorno. */
+export async function recordClientReply(ctx: Ctx, raw: ReplyInput) {
+  assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  const i = parse(replyInput, raw);
+  const now = new Date();
+  const [company] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.id, i.companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
+  if (!company) throw new NotFoundError("Empresa");
+
+  await db.transaction(async (tx) => {
+    await tx.insert(crmActivities).values({
+      workspaceId: ctx.workspaceId,
+      dealId: i.dealId,
+      companyId: i.companyId,
+      contactId: i.contactId,
+      kind: "resposta",
+      channel: i.channel,
+      content: i.summary,
+      authorId: ctx.userId,
+      authorKind: ctx.actor,
+      occurredAt: now,
+    });
+
+    if (i.contactId) {
+      await tx.update(crmContacts).set({ lastContactAt: now }).where(eq(crmContacts.id, i.contactId));
+    }
+
+    if (i.followUpDays > 0) {
+      const due = addDays(now, i.followUpDays);
+      const title = i.followUpTitle ?? "Responder / dar retorno ao cliente";
+      if (i.dealId) {
+        await tx
+          .update(crmDeals)
+          .set({ nextStep: title, nextStepAt: due, lastActivityAt: now, updatedAt: now })
+          .where(and(eq(crmDeals.id, i.dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
+      }
+      await tx.insert(crmTasks).values({
+        workspaceId: ctx.workspaceId,
+        title,
+        dueAt: due,
+        dealId: i.dealId,
+        companyId: i.companyId,
+        priority: "alta",
+        source: "manual",
+        createdBy: ctx.userId,
+      });
+    } else if (i.dealId) {
+      await tx.update(crmDeals).set({ lastActivityAt: now, updatedAt: now }).where(and(eq(crmDeals.id, i.dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
+    }
+  });
+
+  if (i.dealId && i.advanceToConversation) {
+    await advanceDeal(ctx, i.dealId, "conversa").catch(() => null);
+  }
+  await audit(ctx, "reply", "company", i.companyId, { channel: i.channel, dealId: i.dealId });
+  return { ok: true as const };
+}
+
+const followUpInput = z.object({
+  companyId: z.string().uuid(),
+  dealId: z.string().uuid().nullish().transform((v) => v ?? null),
+  title: reqStr(180),
+  days: z.number().int().min(1).max(60).default(3),
+  priority: z.enum(["baixa", "media", "alta", "urgente"]).default("media"),
+});
+export type FollowUpInput = z.input<typeof followUpInput>;
+
+/** Agenda tarefa de follow-up direto da aba Mensagens e sincroniza próximo passo da oportunidade. */
+export async function scheduleMessageFollowUp(ctx: Ctx, raw: FollowUpInput) {
+  assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  const i = parse(followUpInput, raw);
+  const now = new Date();
+  const due = addDays(now, i.days);
+  const [company] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.id, i.companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
+  if (!company) throw new NotFoundError("Empresa");
+
+  const task = await db.transaction(async (tx) => {
+    const [t] = await tx
+      .insert(crmTasks)
+      .values({
+        workspaceId: ctx.workspaceId,
+        title: i.title,
+        dueAt: due,
+        dealId: i.dealId,
+        companyId: i.companyId,
+        priority: i.priority,
+        source: "manual",
+        createdBy: ctx.userId,
+      })
+      .returning();
+    if (i.dealId) {
+      await tx
+        .update(crmDeals)
+        .set({ nextStep: i.title, nextStepAt: due, lastActivityAt: now, updatedAt: now })
+        .where(and(eq(crmDeals.id, i.dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
+    }
+    await tx.insert(crmActivities).values({
+      workspaceId: ctx.workspaceId,
+      dealId: i.dealId,
+      companyId: i.companyId,
+      kind: "tarefa",
+      content: `Follow-up agendado: ${i.title}`,
+      meta: { taskId: t.id },
+      authorId: ctx.userId,
+      authorKind: ctx.actor,
+      occurredAt: now,
+    });
+    return t;
+  });
+
+  await audit(ctx, "schedule_followup", "task", task.id, { days: i.days });
+  return task;
 }
 
 export { OPT_OUT_LINE, SOURCES };

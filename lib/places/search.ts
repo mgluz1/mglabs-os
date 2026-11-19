@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 
 import { getCategory, type Category } from "@/lib/config/categories";
 import { db } from "@/lib/db";
@@ -11,9 +11,17 @@ import { isFranchise, nameSimilarity, neighborhoodFrom } from "@/lib/text";
 // Busca na base aberta do Overture Maps (tabela ov_places, carregada pela GitHub Action).
 // Sem custo por busca e sem restrição de mapa: os dados podem ser guardados e mostrados no OpenStreetMap.
 
-const MAX_RESULTS = 600;
+export const MIN_SEARCH_LIMIT = 5;
+export const MAX_RESULTS = 600;
 
-export type SearchRequest = { category: string; center: LatLng; radiusM: number; label?: string };
+export type SearchRequest = {
+  category: string;
+  query?: string;
+  center: LatLng;
+  radiusM: number;
+  limit?: number;
+  label?: string;
+};
 
 export type SearchOutcome =
   | { ok: true; searchId: string; found: number; kept: number; calls: number; partial: boolean; discarded: Record<string, number> }
@@ -35,6 +43,63 @@ type OvRow = {
   lng: number;
 };
 
+function sanitizeSearchTerm(raw?: string | null): string {
+  return (raw ?? "").trim().slice(0, 60);
+}
+
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+type ResolvedFilter =
+  | { ok: true; storedCategory: string; agenda: boolean; categoryId: string; filterSql: SQL }
+  | { ok: false; error: string };
+
+function resolveOvertureFilter(categoryRaw: string, queryRaw?: string): ResolvedFilter {
+  const custom = sanitizeSearchTerm(queryRaw);
+  const storedCustom = categoryRaw.startsWith("q:") ? sanitizeSearchTerm(categoryRaw.slice(2)) : "";
+  const term = categoryRaw === "personalizado" ? custom : storedCustom;
+
+  if (term) {
+    if (term.length < 2) return { ok: false, error: "Digite pelo menos 2 letras para buscar um segmento." };
+    const like = `%${escapeLike(term)}%`;
+    return {
+      ok: true,
+      storedCategory: `q:${term}`,
+      categoryId: `q:${term}`,
+      agenda: false,
+      filterSql: sql`(
+        o.name ilike ${like} escape '\'
+        or coalesce(o.basic_category, '') ilike ${like} escape '\'
+        or coalesce(o.taxonomy_primary, '') ilike ${like} escape '\'
+        or array_to_string(coalesce(o.hierarchy, '{}'::text[]), ' ') ilike ${like} escape '\'
+      )`,
+    };
+  }
+
+  const category = getCategory(categoryRaw);
+  if (!category) return { ok: false, error: "Categoria inválida." };
+  const terms = JSON.stringify(category.overtureTerms);
+  const exclude = JSON.stringify(category.overtureExclude ?? []);
+  const kwRegex = category.nameKeywords?.length ? category.nameKeywords.join("|") : null;
+
+  return {
+    ok: true,
+    storedCategory: category.id,
+    categoryId: category.id,
+    agenda: category.agenda,
+    filterSql: sql`
+      (
+        o.basic_category = any(array(select jsonb_array_elements_text(${terms}::jsonb)))
+        or o.taxonomy_primary = any(array(select jsonb_array_elements_text(${terms}::jsonb)))
+        or o.hierarchy && array(select jsonb_array_elements_text(${terms}::jsonb))
+      )
+      and coalesce(o.basic_category, '') not in (select jsonb_array_elements_text(${exclude}::jsonb))
+      ${kwRegex ? sql`and (coalesce(o.name, '') ~* ${kwRegex} or coalesce(o.basic_category, '') ~* ${kwRegex} or coalesce(o.taxonomy_primary, '') ~* ${kwRegex})` : sql``}
+    `,
+  };
+}
+
 export async function radarInfo() {
   const { rows } = await db.execute<{ total: number; release: string | null; loaded_at: string | null }>(
     sql`select count(*)::int as total, max(release) as release, max(loaded_at) as loaded_at from ov_places`,
@@ -42,26 +107,45 @@ export async function radarInfo() {
   return rows[0] ?? { total: 0, release: null, loaded_at: null };
 }
 
-export async function runSearch(req: SearchRequest): Promise<SearchOutcome> {
-  const category = getCategory(req.category);
-  if (!category) return { ok: false, error: "Categoria inválida." };
+/** Conta quantos negócios reais da base atendem ao filtro espacial + segmento antes de disparar a busca. */
+export async function countAvailablePlaces(req: { category: string; query?: string; center: LatLng; radiusM: number }) {
+  const resolved = resolveOvertureFilter(req.category, req.query);
+  if (!resolved.ok) return { available: 0, maxLimit: MIN_SEARCH_LIMIT, cappedAt: MAX_RESULTS };
   const radiusM = Math.round(Math.min(Math.max(req.radiusM, 500), 15_000));
-  const terms = JSON.stringify(category.overtureTerms);
-  const exclude = JSON.stringify(category.overtureExclude ?? []);
+  const center = `SRID=4326;POINT(${req.center.lng} ${req.center.lat})`;
+  const { rows } = await db.execute<{ total: number }>(sql`
+    select count(*)::int as total
+    from ov_places o
+    where ST_DWithin(o.geom, ${center}::geography, ${radiusM})
+      and o.name is not null
+      and coalesce(o.brand, '') = ''
+      and ${resolved.filterSql}
+      and not exists (select 1 from optouts x where x.overture_id = o.id)
+  `);
+  const available = rows[0]?.total ?? 0;
+  return { available, maxLimit: Math.max(MIN_SEARCH_LIMIT, Math.min(MAX_RESULTS, available)), cappedAt: MAX_RESULTS };
+}
+
+export async function runSearch(req: SearchRequest): Promise<SearchOutcome> {
+  const resolved = resolveOvertureFilter(req.category, req.query);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const radiusM = Math.round(Math.min(Math.max(req.radiusM, 500), 15_000));
+  const limit = Math.round(Math.min(Math.max(req.limit ?? MAX_RESULTS, MIN_SEARCH_LIMIT), MAX_RESULTS));
   const center = `SRID=4326;POINT(${req.center.lng} ${req.center.lat})`;
 
-  const { rows } = await db.execute<OvRow>(sql`
-    with t as (select array_agg(x) as terms from jsonb_array_elements_text(${terms}::jsonb) as x)
+  const { rows: rawRows } = await db.execute<OvRow>(sql`
     select o.id, o.name, o.brand, o.confidence::text as confidence, o.websites, o.socials, o.emails, o.phones,
            o.address, o.locality, o.source_count,
            ST_Y(o.geom::geometry) as lat, ST_X(o.geom::geometry) as lng
-    from ov_places o, t
+    from ov_places o
     where ST_DWithin(o.geom, ${center}::geography, ${radiusM})
-      and (o.basic_category = any(t.terms) or o.taxonomy_primary = any(t.terms) or o.hierarchy && t.terms)
-      and coalesce(o.basic_category, '') not in (select jsonb_array_elements_text(${exclude}::jsonb))
+      and ${resolved.filterSql}
       and not exists (select 1 from optouts x where x.overture_id = o.id)
     order by o.geom <-> ${center}::geography
-    limit ${MAX_RESULTS}`);
+    limit ${limit + 1}`);
+
+  const hasMore = rawRows.length > limit;
+  const rows = rawRows.slice(0, limit);
 
   const discarded = { foraDoRaio: 0, fechado: 0, franquia: 0, duplicado: 0 };
   const kept: OvRow[] = [];
@@ -81,17 +165,17 @@ export async function runSearch(req: SearchRequest): Promise<SearchOutcome> {
     kept.push(r);
   }
 
-  const searchId = await saveResults(req, category, radiusM, kept, rows.length >= MAX_RESULTS);
-  return { ok: true, searchId, found: rows.length, kept: kept.length, calls: 0, partial: rows.length >= MAX_RESULTS, discarded };
+  const searchId = await saveResults(req, resolved.storedCategory, radiusM, kept, hasMore);
+  return { ok: true, searchId, found: rows.length, kept: kept.length, calls: 0, partial: hasMore, discarded };
 }
 
-async function upsertSearchPlaces(searchId: string, category: Category, kept: OvRow[]) {
+async function upsertSearchPlaces(searchId: string, categoryId: Category["id"] | string, kept: OvRow[]) {
   if (kept.length === 0) return;
 
   const rowsJson = kept.map((r) => ({
     overture_id: r.id,
     name: r.name,
-    category: category.id,
+    category: categoryId,
     address: r.address,
     neighborhood: neighborhoodFrom(r.address),
     city: r.locality,
@@ -157,14 +241,14 @@ async function upsertSearchPlaces(searchId: string, category: Category, kept: Ov
     where site_audits.audited_at < now() - interval '30 days' or site_audits.status = 'error'`);
 }
 
-async function saveResults(req: SearchRequest, category: Category, radiusM: number, kept: OvRow[], partial: boolean): Promise<string> {
+async function saveResults(req: SearchRequest, categoryId: string, radiusM: number, kept: OvRow[], partial: boolean): Promise<string> {
   const { rows } = await db.execute<{ id: string }>(sql`
     insert into searches (category, center, radius_m, label, status, api_calls, results)
-    values (${category.id}, ${`SRID=4326;POINT(${req.center.lng} ${req.center.lat})`}::geography, ${radiusM},
+    values (${categoryId}, ${`SRID=4326;POINT(${req.center.lng} ${req.center.lat})`}::geography, ${radiusM},
             ${req.label ?? null}, ${partial ? "partial" : "done"}, 0, ${kept.length})
     returning id`);
   const searchId = rows[0].id;
-  await upsertSearchPlaces(searchId, category, kept);
+  await upsertSearchPlaces(searchId, categoryId, kept);
   return searchId;
 }
 
@@ -175,36 +259,36 @@ export async function loadMoreSearchResults(searchId: string): Promise<{ ok: tru
     from searches where id = ${searchId}`);
   const s = searchRows[0];
   if (!s) return { ok: false, error: "Busca não encontrada." };
-  const category = getCategory(s.category);
-  if (!category) return { ok: false, error: "Categoria inválida." };
+  const resolved = resolveOvertureFilter(s.category);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
   if (s.status !== "partial") return { ok: true, added: 0, hasMore: false };
 
-  const terms = JSON.stringify(category.overtureTerms);
-  const exclude = JSON.stringify(category.overtureExclude ?? []);
   const center = `SRID=4326;POINT(${Number(s.lng)} ${Number(s.lat)})`;
+  const batchLimit = MAX_RESULTS;
 
-  const [{ rows: existing }, { rows }] = await Promise.all([
+  const [{ rows: existing }, { rows: rawRows }] = await Promise.all([
     db.execute<{ name: string | null; lat: number; lng: number }>(sql`
       select p.name, ST_Y(p.geom::geometry) as lat, ST_X(p.geom::geometry) as lng
       from search_results sr join places p on p.id = sr.place_id
       where sr.search_id = ${searchId}`),
     db.execute<OvRow>(sql`
-      with t as (select array_agg(x) as terms from jsonb_array_elements_text(${terms}::jsonb) as x)
       select o.id, o.name, o.brand, o.confidence::text as confidence, o.websites, o.socials, o.emails, o.phones,
              o.address, o.locality, o.source_count,
              ST_Y(o.geom::geometry) as lat, ST_X(o.geom::geometry) as lng
-      from ov_places o, t
+      from ov_places o
       where ST_DWithin(o.geom, ${center}::geography, ${s.radius_m})
-        and (o.basic_category = any(t.terms) or o.taxonomy_primary = any(t.terms) or o.hierarchy && t.terms)
-        and coalesce(o.basic_category, '') not in (select jsonb_array_elements_text(${exclude}::jsonb))
+        and ${resolved.filterSql}
         and not exists (select 1 from optouts x where x.overture_id = o.id)
         and not exists (
           select 1 from search_results sr join places p on p.id = sr.place_id
           where sr.search_id = ${searchId} and p.overture_id = o.id
         )
       order by o.geom <-> ${center}::geography, o.id
-      limit ${MAX_RESULTS}`),
+      limit ${batchLimit + 1}`),
   ]);
+
+  const hasMore = rawRows.length > batchLimit;
+  const rows = rawRows.slice(0, batchLimit);
 
   const kept: OvRow[] = [];
   const poolCoords = existing.map((e) => ({ name: e.name ?? "", lat: Number(e.lat), lng: Number(e.lng) }));
@@ -218,8 +302,7 @@ export async function loadMoreSearchResults(searchId: string): Promise<{ ok: tru
     poolCoords.push({ name, lat: loc.lat, lng: loc.lng });
   }
 
-  await upsertSearchPlaces(searchId, category, kept);
-  const hasMore = rows.length >= MAX_RESULTS;
+  await upsertSearchPlaces(searchId, resolved.storedCategory, kept);
   await db.execute(sql`
     update searches
     set status = ${hasMore ? "partial" : "done"},

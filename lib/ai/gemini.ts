@@ -10,8 +10,9 @@ import { ymdSP } from "@/lib/dates";
 
 export class AiError extends Error {}
 
-/** Modelo configurável. O padrão segue docs/ARQUITETURA-IA-MCP-GEMINI.md; confirme na sua conta em aistudio.google.com/rate-limit. */
+/** Modelo configurável. O padrão segue a geração Flash-Lite atual na Gemini API, com fallbacks seguros se 404. */
 export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+export const MODEL_FALLBACKS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash"] as const;
 
 export function aiConfig() {
   const key = process.env.GEMINI_API_KEY?.trim();
@@ -72,30 +73,59 @@ function friendly(e: unknown): AiError {
   return new AiError("Não foi possível usar a IA agora. O modo manual continua disponível.");
 }
 
+/** Confere sem gastar cota se o modelo configurado existe para a chave atual. */
+export async function checkGeminiModel(): Promise<{ ok: boolean; model: string; error?: string }> {
+  const cfg = aiConfig();
+  if (!cfg.enabled) return { ok: false, model: cfg.model, error: "GEMINI_API_KEY ausente ou desativada." };
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { timeout: 10_000 } });
+    await ai.models.get({ model: cfg.model });
+    return { ok: true, model: cfg.model };
+  } catch (e) {
+    return { ok: false, model: cfg.model, error: friendly(e).message };
+  }
+}
+
 /**
- * Chama o Gemini pedindo JSON. Sem retry automático (429/503 viram mensagem e modo manual).
+ * Chama o Gemini pedindo JSON. Sem retry automático em 429/503; tenta fallback apenas se 404 (modelo indisponível).
  * Logs só têm recurso, modelo, status e duração — nunca o conteúdo.
  */
 export async function generateJson<S extends z.ZodTypeAny>(ctx: Ctx, feature: AiFeature, input: { system: string; user: string; schema: S; temperature?: number; maxOutputTokens?: number }): Promise<z.output<S>> {
   const cfg = assertAiEnabled();
   if (!(await reserveAiQuota(ctx, feature, cfg.dailyLimit))) throw new AiError(`Limite diário de ${cfg.dailyLimit} chamadas de IA atingido. Volte amanhã ou use o modo manual.`);
   const started = Date.now();
+  const candidates = [cfg.model, ...MODEL_FALLBACKS.filter((m) => m !== cfg.model)];
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { timeout: 25_000 } });
-    const res = await ai.models.generateContent({
-      model: cfg.model,
-      contents: input.user,
-      config: {
-        systemInstruction: input.system,
-        temperature: input.temperature ?? 0.7,
-        maxOutputTokens: input.maxOutputTokens ?? 900,
-        responseMimeType: "application/json",
-        responseJsonSchema: z.toJSONSchema(input.schema),
-      },
-    });
+    let res: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+    let modelUsed = cfg.model;
+    let lastErr: unknown = null;
+    for (const model of candidates) {
+      try {
+        res = await ai.models.generateContent({
+          model,
+          contents: input.user,
+          config: {
+            systemInstruction: input.system,
+            temperature: input.temperature ?? 0.7,
+            maxOutputTokens: input.maxOutputTokens ?? 1100,
+            responseMimeType: "application/json",
+            responseJsonSchema: z.toJSONSchema(input.schema),
+          },
+        });
+        modelUsed = model;
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        const status = err instanceof ApiError ? err.status : 0;
+        if (status !== 404) throw err;
+      }
+    }
+    if (!res) throw lastErr ?? new Error("Nenhum modelo Gemini disponível.");
     const raw = res.text ?? "";
     const parsed = input.schema.safeParse(JSON.parse(raw.replace(/^```json\s*|```\s*$/g, "")));
-    console.info("gemini", { feature, model: cfg.model, ms: Date.now() - started, ok: parsed.success });
+    console.info("gemini", { feature, model: modelUsed, ms: Date.now() - started, ok: parsed.success });
     if (!parsed.success) {
       await markError(ctx, feature);
       throw new AiError("A IA devolveu uma resposta fora do formato. Tente gerar de novo.");

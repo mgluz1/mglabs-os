@@ -2,18 +2,25 @@
 
 import {
   AtSign,
-  Bot,
-  CalendarCheck,
+  Briefcase,
+  Coffee,
   Dumbbell,
   Globe,
-  LayoutTemplate,
+  HeartPulse,
+  Home,
+  Layers,
   MessageCircle,
+  PawPrint,
   Phone,
+  Pizza,
   Scissors,
+  ShoppingBag,
+  Smile,
   Sparkles,
   Star,
   Stethoscope,
   UtensilsCrossed,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,17 +29,24 @@ import type { RadarPlace } from "@/lib/types";
 
 export const CATEGORY_ICON: Record<string, LucideIcon> = {
   barbearia: Scissors,
+  salao: Sparkles,
+  dentista: Smile,
+  estetica: HeartPulse,
+  petshop: PawPrint,
   academia: Dumbbell,
   restaurante: UtensilsCrossed,
+  pizzaria: Pizza,
   clinica: Stethoscope,
-  salao: Sparkles,
+  cafeteria: Coffee,
+  oficina: Wrench,
+  imobiliaria: Home,
+  escritorio: Briefcase,
+  comercio: ShoppingBag,
 };
 
 export const OFFER_CARDS = [
-  { id: "site", label: "Site profissional", hint: "Para quem não tem site ou tem site ruim", icon: Globe, ticket: 1200 },
-  { id: "agendamento", label: "Agendamento online", hint: "Barbearias, salões, clínicas", icon: CalendarCheck, ticket: 600 },
-  { id: "landing", label: "Landing page", hint: "Página de serviços e captação", icon: LayoutTemplate, ticket: 900 },
-  { id: "automacao_whatsapp", label: "Automação de WhatsApp", hint: "Atendimento e lembretes", icon: Bot, ticket: 1500 },
+  { id: "site", label: "Site profissional", hint: "Para empresas sem site ou com site desatualizado", icon: Globe, ticket: 1500 },
+  { id: "servicos_mglabs", label: "Serviços MGLABS", hint: "Automação, agendamento, IA e páginas de venda", icon: Layers, ticket: 2000 },
 ] as const;
 export type OfferCardId = (typeof OFFER_CARDS)[number]["id"];
 

@@ -34,6 +34,9 @@ const RISKY: [RegExp, string][] = [
   [/\b(desconto|promoção|gr[aá]tis)\b/i, "cita desconto/gratuidade"],
   [/\b(aumentar|dobrar|triplicar)\b[^.]{0,40}\b(vendas|faturamento|clientes|lucro)\b/i, "promete resultado"],
   [/encontrei (vocês|a \S+) no google/i, "afirma ter achado no Google"],
+  [/\b(soluções inovadoras|transformação digital|alavancar (seus )?resultados|sinergia|ecossistema digital)\b/i, "jargão comercial robótico"],
+  [/\b(espero que esteja (tudo )?bem|venho por meio desta|prezado|caro cliente)\b/i, "abertura formal/genérica"],
+  [/\b(admiro muito|trabalho incrível|sucesso absoluto)\b/i, "elogio genérico não verificado"],
 ];
 export function riskWarnings(text: string): string[] {
   return RISKY.filter(([re]) => re.test(text)).map(([, why]) => why);

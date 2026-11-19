@@ -119,7 +119,8 @@ describe("P1 — Sinais, linguagem e filtros do Radar", () => {
   });
 
   it("valida e converte a oferta 'Você vende' para o serviço do CRM", () => {
-    expect(resolveOfferService("site")).toBe("Site institucional");
+    expect(resolveOfferService("site")).toBe("Site profissional");
+    expect(resolveOfferService("servicos_mglabs")).toBe("Serviços MGLABS");
     expect(resolveOfferService("agendamento")).toBe("Site + agendamento");
     expect(resolveOfferService("landing")).toBe("Landing page");
     expect(resolveOfferService("automacao_whatsapp")).toBe("Automação de WhatsApp");

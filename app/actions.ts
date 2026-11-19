@@ -21,12 +21,12 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
 // ---------- Radar (descoberta) ----------
 
-export async function searchAction(input: { category: string; lat: number; lng: number; radiusM: number; label?: string }): Promise<SearchOutcome> {
+export async function searchAction(input: { category: string; query?: string; lat: number; lng: number; radiusM: number; limit?: number; label?: string }): Promise<SearchOutcome> {
   try {
     const ctx = await requireCtx();
     assertModule(ctx, "comercial");
     if (![input.lat, input.lng, input.radiusM].every(Number.isFinite)) return { ok: false, error: "Centro ou raio inválido." };
-    const out = await runSearch({ category: input.category, center: { lat: input.lat, lng: input.lng }, radiusM: input.radiusM, label: input.label });
+    const out = await runSearch({ category: input.category, query: input.query, center: { lat: input.lat, lng: input.lng }, radiusM: input.radiusM, limit: input.limit, label: input.label });
     if (out.ok) after(() => processAuditBatch(5).catch((e) => console.error("audit", e)));
     return out;
   } catch (e) {

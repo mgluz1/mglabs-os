@@ -436,6 +436,7 @@ export const crmMessageTemplates = pgTable("crm_message_templates", {
   channel: text("channel").notNull().default("whatsapp"),
   body: text("body").notNull(),
   version: integer("version").notNull().default(1),
+  favorite: boolean("favorite").notNull().default(false),
   active: boolean("active").notNull().default(true),
   createdAt: ts("created_at").defaultNow().notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),

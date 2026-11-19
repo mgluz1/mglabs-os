@@ -62,6 +62,18 @@ export const TEMPLATE_VARIABLES = ["empresa", "contato", "remetente", "servico",
 /** Modelos iniciais (editáveis em Mensagens). Curtos, humanos, sem promessas nem números inventados. */
 export const DEFAULT_TEMPLATES: { name: string; objective: ObjectiveId; service?: string | null; body: string }[] = [
   {
+    name: "Primeiro contato — Site profissional",
+    objective: "primeiro_contato",
+    service: "Site profissional",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS.\n{{origem}}.\n{{observacao}}\nDesenvolvo sites rápidos no celular e pensados para facilitar o contato de clientes.\nPosso te mostrar como ficaria uma estrutura simples para a {{empresa}}?",
+  },
+  {
+    name: "Primeiro contato — Serviços MGLABS",
+    objective: "primeiro_contato",
+    service: "Serviços MGLABS",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS.\n{{origem}}.\n{{observacao}}\nAjudamos negócios locais a ganhar eficiência com páginas de conversão, agendamento e automação de WhatsApp.\nFaz sentido eu te mostrar como aplicamos isso na rotina da {{empresa}}?",
+  },
+  {
     name: "Primeiro contato — direto",
     objective: "primeiro_contato",
     service: null,

@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
-import { MESSAGE_OBJECTIVES, MESSAGE_TONES, STAGE_DEFS, labelOf } from "@/lib/config/crm";
+import { MESSAGE_LENGTHS, MESSAGE_OBJECTIVES, MESSAGE_TONES, STAGE_DEFS, labelOf, type MessageLengthId } from "@/lib/config/crm";
 import { assertAiEnabled, generateJson } from "@/lib/ai/gemini";
 import { riskWarnings, sanitizeForAi } from "@/lib/ai/sanitize";
 import { COLD_OBJECTIVES, renderTemplate, withOptOut } from "@/lib/messages";
@@ -12,24 +12,47 @@ import { messageContext, varsFor } from "@/lib/services/messages";
 
 // ---------- 1. Gerador de mensagens ----------
 
-const MESSAGE_SYSTEM = `Você é redator comercial da MGLABS, estúdio de design e desenvolvimento de sites de Goiânia. Escreve mensagens curtas de WhatsApp para pequenos negócios locais.
-Regras obrigatórias:
-- Português do Brasil, humano, profissional e direto. No máximo 4 frases curtas, terminando com 1 pergunta simples. No máximo 1 emoji (ou nenhum).
-- Personalize SOMENTE com os "fatos verificados" recebidos. Se não houver fato, não invente: escreva uma abordagem simples e honesta.
-- Nunca invente defeitos, resultados, elogios, prazos, preços, descontos, números, nem urgência. Nada de promessa de faturamento.
-- Só mencione como o contato foi encontrado se o campo "origem" vier preenchido, usando exatamente aquela frase. Nunca diga "encontrei no Google".
-- Use os marcadores literais {{contato}} (saudação, ex.: "Olá{{contato}}!") e {{remetente}} (quem escreve). Não escreva nomes de pessoas.
-- Não inclua linha de opt-out nem assinatura longa.
-- As variações devem ser diferentes entre si em abertura e estrutura.
-Responda em JSON: {"variants":[{"text":"..."}]} com o número de variações pedido.`;
+const MESSAGE_SYSTEM = `Você escreve mensagens comerciais para a MGLABS (estúdio de sites, automação de WhatsApp e soluções digitais) em português do Brasil, como se o próprio fundador ({{remetente}}) estivesse mandando no WhatsApp ou e-mail para um dono de negócio local.
 
-const messageSchema = z.object({ variants: z.array(z.object({ text: z.string().min(10).max(1200) })).min(1).max(3) });
+Regras obrigatórias de estilo e veracidade:
+- Linguagem humana, natural e direta — zero tom robótico, zero "Prezado", zero "Espero que esteja tudo bem", zero "soluções inovadoras / transformação digital / alavancar resultados / sinergia".
+- NUNCA faça elogios falsos ou não verificados ("admiro muito o trabalho de vocês", "excelente atendimento").
+- NUNCA invente defeitos, números, prazos, descontos, promessas de faturamento ou garantias. Use SOMENTE os fatos verificados e o histórico recebidos.
+- Se houver histórico recente (follow-up, resposta, proposta ou negociação), dê continuidade natural ao que já aconteceu em vez de se apresentar do zero.
+- Se for primeiro contato sem fato auditado, escreva uma abordagem simples, honesta e sem exageros.
+- Só mencione como encontrou a empresa se o campo "origem" vier preenchido, exatamente com aquela ideia. Nunca diga "encontrei no Google".
+- Respeite rigorosamente o tamanho pedido:
+  * curta: 2 a 3 frases curtas, diretas, sem blocos longos (ideal para leitura rápida no celular).
+  * media: 3 a 4 frases naturais com contexto objetivo e 1 pergunta simples no final.
+  * detalhada: 4 a 6 frases bem organizadas (contexto claro, benefício prático sem promessa vazia e próximo passo definido), ainda conversacional.
+- Use no máximo 1 emoji (ou nenhum).
+- Use os marcadores literais {{contato}} (para encaixar saudação, ex.: "Olá{{contato}}!") e {{remetente}} (seu nome). Não invente nomes de pessoas.
+- Não inclua linha de opt-out nem assinatura formal.
+- Entregue variações realmente diferentes entre si na abertura e no ângulo.
+
+Responda exclusivamente em JSON válido: {"variants":[{"text":"..."}]}.`;
+
+const messageSchema = z.object({ variants: z.array(z.object({ text: z.string().min(10).max(1500) })).min(1).max(3) });
 
 export type MessageVariant = { text: string; warnings: string[] };
 
 export async function generateMessageVariants(
   ctx: Ctx,
-  input: { dealId?: string | null; companyId?: string | null; contactId?: string | null; objective: string; service?: string | null; tone: string; observation?: string | null; useFacts?: string[]; count?: number; sender: string; optOut: boolean; consent: boolean },
+  input: {
+    dealId?: string | null;
+    companyId?: string | null;
+    contactId?: string | null;
+    objective: string;
+    service?: string | null;
+    tone: string;
+    length?: MessageLengthId;
+    observation?: string | null;
+    useFacts?: string[];
+    count?: number;
+    sender: string;
+    optOut: boolean;
+    consent: boolean;
+  },
 ): Promise<MessageVariant[]> {
   assertWrite(ctx);
   assertModule(ctx, "comercial");
@@ -39,20 +62,45 @@ export async function generateMessageVariants(
   if (mc.blocked) throw new ValidationError(mc.blockedReason ?? "Contato bloqueado.");
   const obj = labelOf(MESSAGE_OBJECTIVES, input.objective);
   const tone = labelOf(MESSAGE_TONES, input.tone);
+  const lengthId: MessageLengthId = input.length && MESSAGE_LENGTHS.some((l) => l.id === input.length) ? input.length : "media";
+  const lengthSpec = MESSAGE_LENGTHS.find((l) => l.id === lengthId)!;
   const facts = [...(input.useFacts ?? mc.facts)].map((f) => sanitizeForAi(f, { maxLen: 200 })).filter(Boolean);
   const obs = sanitizeForAi(input.observation, { maxLen: 300 });
   if (obs) facts.push(obs);
+
+  const presenceParts = [
+    mc.presence.siteType ? `status do site: ${mc.presence.siteType}` : mc.presence.website ? "tem site cadastrado" : "sem site cadastrado",
+    mc.presence.psiPerformance != null ? `desempenho móvel (PageSpeed): ${mc.presence.psiPerformance}/100` : null,
+    mc.presence.viewport === false ? "site com problema de visualização no celular" : null,
+    mc.presence.hasBooking === false ? "agendamento online não detectado no site" : null,
+    mc.presence.instagram ? "tem Instagram informado" : null,
+  ].filter(Boolean);
+
+  const historyLines = mc.recentHistory
+    .slice(0, 5)
+    .reverse()
+    .map((h) => `- ${h.kind}${h.channel ? ` (${h.channel})` : ""}: ${sanitizeForAi(h.content?.replaceAll(mc.companyName, "[empresa]"), { maxLen: 180 })}`)
+    .filter((line) => !line.endsWith(": "));
+
   const user = [
     `Objetivo da mensagem: ${obj}`,
     `Serviço oferecido: ${sanitizeForAi(input.service ?? mc.serviceType ?? "site profissional", { maxLen: 80 })}`,
     `Tom: ${tone}`,
+    `Tamanho desejado: ${lengthSpec.id} (${lengthSpec.hint})`,
     `Negócio: ${sanitizeForAi(mc.companyName, { maxLen: 80 })}${mc.category ? ` (${sanitizeForAi(mc.category, { maxLen: 40 })}` + (mc.city ? `, ${sanitizeForAi(mc.city, { maxLen: 40 })}` : "") + ")" : ""}`,
-    `Origem (use esta frase se for citar como encontrou): ${mc.origin ? sanitizeForAi(mc.origin, { maxLen: 160 }) : "não informar"}`,
-    `Fatos verificados:${facts.length ? facts.map((f) => `\n- ${f}`).join("") : "\n- nenhum"}`,
+    mc.dealStageLabel ? `Etapa atual no CRM: ${mc.dealStageLabel}` : null,
+    mc.nextStep ? `Próximo passo planejado: ${sanitizeForAi(mc.nextStep, { maxLen: 120 })}` : null,
+    `Presença digital: ${presenceParts.join(" | ")}`,
+    `Origem (só citar se fizer sentido no primeiro contato): ${mc.origin ? sanitizeForAi(mc.origin, { maxLen: 160 }) : "não informar"}`,
+    `Fatos verificados:${facts.length ? facts.map((f) => `\n- ${f}`).join("") : "\n- nenhum fato extra informado"}`,
+    `Histórico recente com este lead:${historyLines.length ? "\n" + historyLines.join("\n") : "\n- nenhuma interação registrada ainda"}`,
     `Quantidade de variações: ${Math.min(Math.max(input.count ?? 3, 1), 3)}`,
-  ].join("\n");
-  const out = await generateJson(ctx, "mensagem", { system: MESSAGE_SYSTEM, user, schema: messageSchema, temperature: 0.8 });
-  const vars = varsFor(mc, { sender: input.sender });
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const out = await generateJson(ctx, "mensagem", { system: MESSAGE_SYSTEM, user, schema: messageSchema, temperature: 0.75, maxOutputTokens: 1200 });
+  const vars = varsFor(mc, { sender: input.sender, service: input.service, observation: input.observation });
   return out.variants.slice(0, input.count ?? 3).map((v) => {
     // os marcadores são preenchidos aqui, no servidor: nomes de pessoas nunca foram ao Gemini
     let text = renderTemplate(v.text, vars);
