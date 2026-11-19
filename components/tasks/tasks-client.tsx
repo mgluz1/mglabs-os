@@ -33,16 +33,16 @@ export function TasksClient({ view, tasks, counts, deals, companies }: { view: s
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <nav aria-label="Visões" className="flex flex-wrap gap-1">
           {VIEWS.map(([k, l]) => (
-            <button key={k} onClick={() => router.push(`/tarefas?v=${k}`)} aria-current={view === k ? "page" : undefined} className={`rounded-lg px-3 py-1.5 text-sm ${view === k ? "bg-brand/15 font-medium text-brand" : "text-muted hover:bg-fg/6 hover:text-fg"}`}>
+            <button type="button" key={k} onClick={() => router.push(`/tarefas?v=${k}`)} aria-current={view === k ? "page" : undefined} className={`rounded-lg px-3 py-1.5 text-sm ${view === k ? "bg-brand/15 font-medium text-brand" : "text-muted hover:bg-fg/6 hover:text-fg"}`}>
               {l}{k !== "concluidas" && counts[k] != null && <span className={`ml-1.5 text-xs ${k === "atrasadas" && counts[k] ? "text-danger" : "text-muted"}`}>{counts[k]}</span>}
             </button>
           ))}
         </nav>
-        <button className="btn btn-primary btn-sm ml-auto" onClick={() => setEditing("novo")}><Plus className="h-4 w-4" /> Nova tarefa</button>
+        <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={() => setEditing("novo")}><Plus className="h-4 w-4" aria-hidden /> Nova tarefa</button>
       </div>
 
       {tasks.length === 0 ? (
-        <EmptyState icon={CalendarDays} title={view === "atrasadas" ? "Nada atrasado 🎉" : view === "hoje" ? "Nada para hoje" : "Nenhuma tarefa aqui"} description="Crie tarefas ligadas a oportunidades, clientes ou projetos para não perder nenhum retorno." action={<button className="btn btn-primary" onClick={() => setEditing("novo")}>Nova tarefa</button>} />
+        <EmptyState icon={CalendarDays} title={view === "atrasadas" ? "Nada atrasado 🎉" : view === "hoje" ? "Nada para hoje" : "Nenhuma tarefa aqui"} description="Crie tarefas ligadas a oportunidades, clientes ou projetos para não perder nenhum retorno." action={<button type="button" className="btn btn-primary" onClick={() => setEditing("novo")}>Nova tarefa</button>} />
       ) : (
         <div className="space-y-5">
           {[...groups.entries()].map(([day, items]) => (
@@ -57,7 +57,7 @@ export function TasksClient({ view, tasks, counts, deals, companies }: { view: s
                   const late = !done && t.dueAt && t.dueAt.getTime() < new Date().setHours(0, 0, 0, 0);
                   return (
                     <li key={t.id} className="flex items-start gap-3 px-4 py-3">
-                      <button aria-label={done ? "Reabrir tarefa" : "Concluir tarefa"} disabled={pending} onClick={() => run(() => (done ? reopenTaskAction(t.id) : completeTaskAction(t.id)), { ok: done ? "Tarefa reaberta." : "Tarefa concluída." })} className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition ${done ? "border-brand bg-brand text-brand-on" : "border-fg/30 hover:border-brand"}`}>{done && <Check className="h-3.5 w-3.5" />}</button>
+                      <button type="button" aria-label={done ? "Reabrir tarefa" : "Concluir tarefa"} disabled={pending} onClick={() => run(() => (done ? reopenTaskAction(t.id) : completeTaskAction(t.id)), { ok: done ? "Tarefa reaberta." : "Tarefa concluída." })} className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition ${done ? "border-brand bg-brand text-brand-on" : "border-fg/30 hover:border-brand"}`}>{done && <Check className="h-3.5 w-3.5" aria-hidden />}</button>
                       <div className="min-w-0 flex-1">
                         <p className={`text-sm ${done ? "text-muted line-through" : "font-medium"}`}>{t.title}</p>
                         {t.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted">{t.description}</p>}
@@ -70,8 +70,8 @@ export function TasksClient({ view, tasks, counts, deals, companies }: { view: s
                         </p>
                       </div>
                       {!done && <Badge tone={priorityTone(t.priority)}>{labelOf(PRIORITIES, t.priority)}</Badge>}
-                      <button className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setEditing(t)} aria-label={`Editar ${t.title}`}><Pencil className="h-3.5 w-3.5" /></button>
-                      <ConfirmButton className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger" label="Excluir?" onConfirm={() => run(() => deleteTaskAction(t.id), { ok: "Tarefa excluída." })}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton>
+                      <button type="button" className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setEditing(t)} aria-label={`Editar ${t.title}`}><Pencil className="h-3.5 w-3.5" /></button>
+                      <ConfirmButton className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger" label="Excluir?" ariaLabel={`Excluir ${t.title}`} onConfirm={() => run(() => deleteTaskAction(t.id), { ok: "Tarefa excluída." })}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton>
                     </li>
                   );
                 })}

@@ -30,6 +30,9 @@ const DASH: DashboardData = {
     { kind: "negocio", id: "d2", title: "Enviar proposta revisada", companyName: "Clínica Vida Plena", dueAt: new Date(now + day), dealId: "d2", overdue: false },
     { kind: "tarefa", id: "t3", title: "Reunião de briefing", companyName: "Moraes Advocacia", dueAt: new Date(now + 3 * day), dealId: null, overdue: false },
   ],
+  attentionQueue: [
+    { reason: "aguardando_resposta", id: "d1", title: "Site institucional — Studio Aurora", companyName: "Studio Aurora", dealId: "d1", proposalId: null, days: 3 },
+  ],
   recent: [
     { id: "a1", kind: "etapa", content: "Movido de Conversa para Proposta", occurredAt: new Date(now - 3_600_000), companyName: "Studio Aurora", companyId: "c1", dealId: "d1", dealTitle: null },
     { id: "a2", kind: "mensagem_enviada", content: "Mensagem registrada via WhatsApp", occurredAt: new Date(now - 7_200_000), companyName: "Clínica Vida Plena", companyId: "c2", dealId: "d2", dealTitle: null },
@@ -37,7 +40,7 @@ const DASH: DashboardData = {
   ],
   finance: { pipelineCents: 3_250_000, pipelineWeightedCents: 1_180_000, contractedCents: 1_650_000, wonCount: 3, billedCents: 1_650_000, toReceiveCents: 900_000, overdueCents: 150_000, receivedCents: 750_000, receivedThisMonthCents: 500_000, monthly: [], byClient: [], receivedPeriodCents: 750_000 },
 };
-const EMPTY: DashboardData = { ...DASH, leads: 0, newLeads: 0, openDeals: 0, pipelineCents: 0, wonTotal: 0, companies: 0, funnel: [], followups: [], recent: [], finance: null };
+const EMPTY: DashboardData = { ...DASH, leads: 0, newLeads: 0, openDeals: 0, pipelineCents: 0, wonTotal: 0, companies: 0, funnel: [], followups: [], attentionQueue: [], recent: [], finance: null };
 
 const deal = (i: number, p: Partial<DealCard>): DealCard => ({
   id: `d${i}`, title: "Site institucional", companyId: `c${i}`, companyName: "Empresa", category: null, city: "Goiânia", stageId: "s", stageKey: "novo", stageKind: "open", valueCents: 300_000, probability: 20, source: "manual", serviceType: null,

@@ -8,7 +8,7 @@ import { PROJECT_PHASES, PROJECT_STATUS } from "@/lib/config/crm";
 import { addDays } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { logActivity, timelineFor } from "@/lib/services/activities";
-import { assertModule, assertWrite, audit, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
+import { assertAnyModule, assertModule, assertWrite, audit, canModule, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { createReceivables } from "@/lib/services/finance";
 import { createTask } from "@/lib/services/tasks";
 import { dateOnly, optStr, parse, reqStr } from "@/lib/services/util";
@@ -40,6 +40,8 @@ const PHASE_TASKS: Record<string, string[]> = {
  */
 export async function convertDealToProject(ctx: Ctx, dealId: string, opts: { createReceivables?: boolean; dueDate?: string } = {}) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
+  assertModule(ctx, "operacao");
   const [deal] = await db.select().from(crmDeals).where(and(eq(crmDeals.id, dealId), eq(crmDeals.workspaceId, ctx.workspaceId)));
   if (!deal) throw new NotFoundError("Oportunidade");
   const [existing] = await db.select().from(crmProjects).where(eq(crmProjects.dealId, dealId));
@@ -80,7 +82,7 @@ export async function convertDealToProject(ctx: Ctx, dealId: string, opts: { cre
   }
   // Cobranças planejadas a partir da proposta aprovada (ou do valor do negócio), só com confirmação.
   const amount = proposal?.totalCents ?? deal.estimatedValueCents ?? 0;
-  if (opts.createReceivables && amount > 0 && (ctx.role === "owner" || ctx.role === "admin" || ctx.role === "financeiro")) {
+  if (opts.createReceivables && amount > 0 && canModule(ctx, "financeiro")) {
     assertModule(ctx, "financeiro");
     await createReceivables(ctx, {
       companyId: deal.companyId, projectId: project.id, dealId, proposalId: proposal?.id ?? null,
@@ -104,6 +106,7 @@ export type ProjectInput = z.input<typeof projectInput>;
 
 export async function createProject(ctx: Ctx, raw: ProjectInput & { companyId: string }) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   const { companyId, ...rest } = raw;
   const i = parse(projectInput, rest);
   const [co] = await db.select({ id: crmCompanies.id }).from(crmCompanies).where(and(eq(crmCompanies.id, companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
@@ -117,6 +120,7 @@ export async function createProject(ctx: Ctx, raw: ProjectInput & { companyId: s
 
 export async function updateProject(ctx: Ctx, id: string, raw: Partial<ProjectInput>) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   const cur = await own(ctx, id);
   const i = parse(projectInput.partial(), raw);
   const patch: Partial<typeof crmProjects.$inferInsert> = { ...i, updatedAt: new Date() };
@@ -130,6 +134,7 @@ export async function updateProject(ctx: Ctx, id: string, raw: Partial<ProjectIn
 
 export async function saveSection(ctx: Ctx, id: string, section: string, text: string) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   if (!SECTION_KEYS.includes(section as never)) throw new ValidationError("Seção inválida.");
   const cur = await own(ctx, id);
   const sections = { ...(cur.sections as Record<string, string>), [section]: text.slice(0, 20000) };
@@ -138,6 +143,7 @@ export async function saveSection(ctx: Ctx, id: string, section: string, text: s
 
 export async function setLinks(ctx: Ctx, id: string, links: { label: string; url: string }[]) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   await own(ctx, id);
   const clean = links
     .map((l) => ({ label: l.label.trim().slice(0, 100), url: l.url.trim().slice(0, 500) }))
@@ -155,6 +161,7 @@ export const documentInput = z.object({
 });
 export async function addDocument(ctx: Ctx, projectId: string, raw: z.input<typeof documentInput>) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   await own(ctx, projectId);
   const i = parse(documentInput, raw);
   if (i.url && !/^https?:\/\//i.test(i.url)) throw new ValidationError("O link precisa começar com http:// ou https://");
@@ -163,11 +170,13 @@ export async function addDocument(ctx: Ctx, projectId: string, raw: z.input<type
 }
 export async function deleteDocument(ctx: Ctx, projectId: string, id: string) {
   assertWrite(ctx);
+  assertModule(ctx, "operacao");
   await own(ctx, projectId);
   await db.delete(crmProjectDocuments).where(and(eq(crmProjectDocuments.id, id), eq(crmProjectDocuments.projectId, projectId)));
 }
 
 export async function listProjects(ctx: Ctx, f: { status?: string; companyId?: string } = {}) {
+  assertAnyModule(ctx, "operacao", "comercial", "financeiro");
   const { rows } = await db.execute<{ id: string; name: string; company_id: string; company_name: string; service_type: string | null; status: string; phase: string; due_date: string | null; open_tasks: number; done_tasks: number }>(sql`
     select p.id, p.name, p.company_id, c.name as company_name, p.service_type, p.status, p.phase, p.due_date::text as due_date,
       (select count(*)::int from crm_tasks t where t.project_id = p.id and t.status in ('pendente','em_andamento')) as open_tasks,
@@ -179,6 +188,7 @@ export async function listProjects(ctx: Ctx, f: { status?: string; companyId?: s
 }
 
 export async function getProject(ctx: Ctx, id: string) {
+  assertModule(ctx, "operacao");
   const project = await own(ctx, id);
   const [company] = await db.select().from(crmCompanies).where(eq(crmCompanies.id, project.companyId));
   const [documents, timeline, dealRow, proposalRow] = await Promise.all([

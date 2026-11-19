@@ -7,7 +7,7 @@ import { crmTasks } from "@/db/schema";
 import { addDays, endOfDaySP, startOfDaySP } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/services/activities";
-import { assertWrite, audit, NotFoundError, type Ctx } from "@/lib/services/ctx";
+import { assertAnyModule, assertModule, assertWrite, audit, NotFoundError, type Ctx } from "@/lib/services/ctx";
 import { instant, limitOf, optStr, parse, reqStr } from "@/lib/services/util";
 
 export const taskInput = z.object({
@@ -45,6 +45,9 @@ export type TaskItem = {
 };
 
 export async function listTasks(ctx: Ctx, f: { view?: TaskView; dealId?: string; companyId?: string; projectId?: string; limit?: number } = {}): Promise<TaskItem[]> {
+  assertAnyModule(ctx, "comercial", "operacao");
+  if (f.dealId) assertModule(ctx, "comercial");
+  if (f.projectId) assertModule(ctx, "operacao");
   const now = new Date();
   const sod = startOfDaySP(now);
   const eod = endOfDaySP(now);
@@ -80,6 +83,7 @@ export async function listTasks(ctx: Ctx, f: { view?: TaskView; dealId?: string;
 }
 
 export async function taskCounts(ctx: Ctx) {
+  assertAnyModule(ctx, "comercial", "operacao");
   const now = new Date();
   const sod = startOfDaySP(now);
   const eod = endOfDaySP(now);
@@ -96,7 +100,10 @@ export async function taskCounts(ctx: Ctx) {
 /** Retorna null se a chave de deduplicação já existia (idempotente para automações). */
 export async function createTask(ctx: Ctx, raw: TaskInput) {
   assertWrite(ctx);
+  assertAnyModule(ctx, "comercial", "operacao");
   const i = parse(taskInput, raw);
+  if (i.dealId) assertModule(ctx, "comercial");
+  if (i.projectId) assertModule(ctx, "operacao");
   const [row] = await db
     .insert(crmTasks)
     .values({ ...i, workspaceId: ctx.workspaceId, createdBy: ctx.userId, source: ctx.actor === "mcp" ? "mcp" : i.source })
@@ -110,8 +117,15 @@ export async function createTask(ctx: Ctx, raw: TaskInput) {
 
 export async function updateTask(ctx: Ctx, id: string, raw: Partial<TaskInput> & { status?: "pendente" | "em_andamento" | "concluida" | "cancelada" }) {
   assertWrite(ctx);
+  assertAnyModule(ctx, "comercial", "operacao");
+  const [cur] = await db.select().from(crmTasks).where(and(eq(crmTasks.id, id), eq(crmTasks.workspaceId, ctx.workspaceId)));
+  if (!cur) throw new NotFoundError("Tarefa");
+  if (cur.dealId) assertModule(ctx, "comercial");
+  if (cur.projectId) assertModule(ctx, "operacao");
   const { status, ...rest } = raw;
   const i = parse(taskInput.partial(), rest);
+  if (i.dealId) assertModule(ctx, "comercial");
+  if (i.projectId) assertModule(ctx, "operacao");
   const patch: Partial<typeof crmTasks.$inferInsert> = { ...i, updatedAt: new Date() };
   if (status) {
     patch.status = status;
@@ -131,6 +145,11 @@ export const reopenTask = (ctx: Ctx, id: string) => updateTask(ctx, id, { status
 
 export async function deleteTask(ctx: Ctx, id: string) {
   assertWrite(ctx);
+  assertAnyModule(ctx, "comercial", "operacao");
+  const [cur] = await db.select().from(crmTasks).where(and(eq(crmTasks.id, id), eq(crmTasks.workspaceId, ctx.workspaceId)));
+  if (!cur) return;
+  if (cur.dealId) assertModule(ctx, "comercial");
+  if (cur.projectId) assertModule(ctx, "operacao");
   await db.delete(crmTasks).where(and(eq(crmTasks.id, id), eq(crmTasks.workspaceId, ctx.workspaceId)));
   await audit(ctx, "delete", "task", id);
 }

@@ -41,7 +41,7 @@ export function assertWrite(ctx: Ctx) {
   if (ctx.scope !== "write") throw new ForbiddenError("Este acesso é somente leitura.");
 }
 
-type Module = "comercial" | "operacao" | "financeiro" | "config";
+export type Module = "comercial" | "operacao" | "financeiro" | "config";
 const ACCESS: Record<RoleId, Module[]> = {
   owner: ["comercial", "operacao", "financeiro", "config"],
   admin: ["comercial", "operacao", "financeiro", "config"],
@@ -51,6 +51,12 @@ const ACCESS: Record<RoleId, Module[]> = {
 };
 export function assertModule(ctx: Ctx, mod: Module) {
   if (!ACCESS[ctx.role]?.includes(mod)) throw new ForbiddenError();
+}
+export function assertAnyModule(ctx: Ctx, ...mods: Module[]) {
+  if (!mods.some((mod) => ACCESS[ctx.role]?.includes(mod))) throw new ForbiddenError();
+}
+export function assertAdmin(ctx: Ctx, msg = "Só administradores podem executar esta ação.") {
+  if (ctx.role !== "owner" && ctx.role !== "admin") throw new ForbiddenError(msg);
 }
 export const canModule = (ctx: Ctx, mod: Module) => !!ACCESS[ctx.role]?.includes(mod);
 
@@ -73,9 +79,23 @@ export async function seedWorkspaceDefaults(workspaceId: string) {
       ].map(([name, description, days], i) => ({ workspaceId, name: name as string, description: description as string, estimatedDays: days as number | null, position: i })),
     );
   }
-  const [{ n: nTpl }] = await db.select({ n: count() }).from(crmMessageTemplates).where(eq(crmMessageTemplates.workspaceId, workspaceId));
-  if (!nTpl) {
-    await db.insert(crmMessageTemplates).values(DEFAULT_TEMPLATES.map((t) => ({ workspaceId, name: t.name, objective: t.objective, body: t.body, channel: "whatsapp" })));
+  const existingTpls = await db
+    .select({ name: crmMessageTemplates.name })
+    .from(crmMessageTemplates)
+    .where(eq(crmMessageTemplates.workspaceId, workspaceId));
+  const haveNames = new Set(existingTpls.map((t) => t.name));
+  const missingTpls = DEFAULT_TEMPLATES.filter((t) => !haveNames.has(t.name));
+  if (missingTpls.length) {
+    await db.insert(crmMessageTemplates).values(
+      missingTpls.map((t) => ({
+        workspaceId,
+        name: t.name,
+        objective: t.objective,
+        service: t.service ?? null,
+        body: t.body,
+        channel: "whatsapp",
+      })),
+    );
   }
 }
 

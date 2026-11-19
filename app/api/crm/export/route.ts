@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { getCategory } from "@/lib/config/categories";
 import { sourceLabel } from "@/lib/config/crm";
 import { fmtDateTime } from "@/lib/dates";
-import { NoAccessError, requireCtx } from "@/lib/services/ctx";
+import { ForbiddenError, NoAccessError, requireCtx } from "@/lib/services/ctx";
 import { listDeals } from "@/lib/services/deals";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
@@ -25,7 +25,13 @@ export async function GET() {
     if (e instanceof NoAccessError) return Response.json({ error: e.message }, { status: 401 });
     throw e;
   }
-  const deals = await listDeals(ctx, { limit: 1000 });
+  let deals: Awaited<ReturnType<typeof listDeals>>;
+  try {
+    deals = await listDeals(ctx, { limit: 1000 });
+  } catch (e) {
+    if (e instanceof ForbiddenError) return Response.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
   const stages = new Map((await db.execute<{ key: string; label: string }>(sql`select key, label from crm_stages where workspace_id = ${ctx.workspaceId}`)).rows.map((r) => [r.key, r.label]));
   const header = ["Oportunidade", "Empresa", "Categoria", "Cidade", "Etapa", "Serviço", "Valor previsto (R$)", "Probabilidade (%)", "Origem", "Próximo passo", "Prazo", "Lead Score", "Motivo da perda", "Contato principal", "Criada em"];
   const lines = deals.map((d) =>

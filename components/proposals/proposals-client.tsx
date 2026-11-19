@@ -20,19 +20,30 @@ type DealOpt = { id: string; companyId: string; label: string };
 
 const tone = (s: string) => (s === "aprovada" ? "ok" : s === "recusada" || s === "expirada" ? "danger" : s === "enviada" || s === "visualizada" ? "info" : "neutral");
 
-export function ProposalsClient({ tab, status, proposals, services, companies, deals }: { tab: "propostas" | "catalogo"; status: string; proposals: P[]; services: S[]; companies: { id: string; name: string }[]; deals: DealOpt[] }) {
+export function ProposalsClient({ tab, status, proposals, services, companies, deals, basePath = "/crm?aba=propostas", catalogOnly = false }: { tab: "propostas" | "catalogo"; status: string; proposals: P[]; services: S[]; companies: { id: string; name: string }[]; deals: DealOpt[]; basePath?: string; catalogOnly?: boolean }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [newOpen, setNewOpen] = useState(sp.get("novo") === "1");
   const [svc, setSvc] = useState<S | "novo" | null>(null);
+  const go = (patch: Record<string, string>) => {
+    const [path, qs] = basePath.split("?");
+    const next = new URLSearchParams(qs ?? "");
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
+    router.push(`${path}${next.size ? `?${next}` : ""}`);
+  };
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div role="tablist" className="flex rounded-lg border border-line p-0.5 text-sm">
-          {([["propostas", "Propostas"], ["catalogo", "Catálogo de serviços"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => router.push(`/propostas?aba=${k}`)} className={`rounded-md px-3 py-1.5 ${tab === k ? "bg-brand/15 font-medium text-brand" : "text-muted hover:text-fg"}`}>{l}</button>)}
-        </div>
-        {tab === "propostas" && <select className="input w-auto" value={status} onChange={(e) => router.push(`/propostas?${e.target.value ? `status=${e.target.value}` : ""}`)} aria-label="Status"><option value="">Todos os status</option>{PROPOSAL_STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>}
-        {tab === "propostas" ? <button className="btn btn-primary btn-sm ml-auto" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> Nova proposta</button> : <button className="btn btn-primary btn-sm ml-auto" onClick={() => setSvc("novo")}><Plus className="h-4 w-4" /> Novo serviço</button>}
+        {!catalogOnly && (
+          <div role="tablist" className="flex rounded-lg border border-line p-0.5 text-sm">
+            {([["propostas", "Propostas"], ["catalogo", "Catálogo de serviços"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => go({ sub: k, status: "" })} className={`rounded-md px-3 py-1.5 ${tab === k ? "bg-brand/15 font-medium text-brand" : "text-muted hover:text-fg"}`}>{l}</button>)}
+          </div>
+        )}
+        {tab === "propostas" && !catalogOnly && <select className="input w-auto" value={status} onChange={(e) => go({ sub: "propostas", status: e.target.value })} aria-label="Status"><option value="">Todos os status</option>{PROPOSAL_STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>}
+        {tab === "propostas" && !catalogOnly ? <button className="btn btn-primary btn-sm ml-auto" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> Nova proposta</button> : <button className="btn btn-primary btn-sm ml-auto" onClick={() => setSvc("novo")}><Plus className="h-4 w-4" /> Novo serviço</button>}
       </div>
 
       {tab === "propostas" ? (

@@ -20,7 +20,8 @@ export async function dashboardData(ctx: Ctx, periodDays = 30) {
   const since = addDays(new Date(), -periodDays);
   const sod = startOfDaySP();
   const eod = endOfDaySP();
-  const [counts, funnel, followups, recent, finance] = await Promise.all([
+  const canComercial = canModule(ctx, "comercial");
+  const [counts, funnel, followups, attentionRows, recent, finance] = await Promise.all([
     db.execute<{ leads: number; new_leads: number; open_deals: number; pipeline: string; weighted: string; won_total: number; won_period: number; won_value_period: string; lost_period: number; open_tasks: number; overdue_tasks: number; today_tasks: number; companies: number; projects_active: number }>(sql`
       select
         (select count(*)::int from crm_companies where workspace_id = ${ctx.workspaceId} and archived_at is null and status = 'lead') as leads,
@@ -49,6 +50,40 @@ export async function dashboardData(ctx: Ctx, periodDays = 30) {
       (select 'negocio', d.id, coalesce(d.next_step, d.title), c.name, d.next_step_at, d.id from crm_deals d join crm_stages s on s.id = d.stage_id join crm_companies c on c.id = d.company_id
          where d.workspace_id = ${ctx.workspaceId} and s.kind = 'open' and d.next_step_at is not null and d.next_step_at <= ${addDays(eod, 7)} order by d.next_step_at limit 8)
       order by due_at limit 10`),
+    canComercial
+      ? db.execute<{ reason: string; id: string; title: string; company_name: string | null; deal_id: string | null; proposal_id: string | null; days: number }>(sql`
+          (select 'proposta_sem_retorno' as reason, p.id::text, p.title, c.name as company_name, p.deal_id::text, p.id::text as proposal_id,
+                  greatest(1, floor(extract(epoch from (now() - p.sent_at)) / 86400))::int as days
+           from crm_proposals p join crm_companies c on c.id = p.company_id
+           where p.workspace_id = ${ctx.workspaceId} and p.status in ('enviada', 'visualizada') and p.sent_at <= now() - interval '3 days'
+           order by p.sent_at asc limit 4)
+          union all
+          (select 'aguardando_resposta' as reason, d.id::text, d.title, c.name as company_name, d.id::text as deal_id, null::text as proposal_id,
+                  greatest(1, floor(extract(epoch from (now() - msg.sent_at)) / 86400))::int as days
+           from crm_deals d join crm_stages s on s.id = d.stage_id join crm_companies c on c.id = d.company_id
+           cross join lateral (
+             select max(a.occurred_at) as sent_at from crm_activities a
+             where a.deal_id = d.id and a.kind = 'mensagem_enviada'
+           ) msg
+           where d.workspace_id = ${ctx.workspaceId} and s.kind = 'open'
+             and msg.sent_at is not null and msg.sent_at <= now() - interval '2 days'
+             and not exists (select 1 from crm_activities r where r.deal_id = d.id and r.kind = 'resposta' and r.occurred_at > msg.sent_at)
+           order by msg.sent_at asc limit 4)
+          union all
+          (select 'interesse_sem_passo' as reason, d.id::text, d.title, c.name as company_name, d.id::text as deal_id, null::text as proposal_id,
+                  greatest(1, floor(extract(epoch from (now() - coalesce(d.last_activity_at, d.updated_at))) / 86400))::int as days
+           from crm_deals d join crm_stages s on s.id = d.stage_id join crm_companies c on c.id = d.company_id
+           where d.workspace_id = ${ctx.workspaceId} and s.key = 'conversa' and d.next_step_at is null
+           order by coalesce(d.last_activity_at, d.updated_at) asc limit 4)
+          union all
+          (select 'parada' as reason, d.id::text, d.title, c.name as company_name, d.id::text as deal_id, null::text as proposal_id,
+                  greatest(1, floor(extract(epoch from (now() - coalesce(d.last_activity_at, d.updated_at))) / 86400))::int as days
+           from crm_deals d join crm_stages s on s.id = d.stage_id join crm_companies c on c.id = d.company_id
+           where d.workspace_id = ${ctx.workspaceId} and s.kind = 'open'
+             and coalesce(d.last_activity_at, d.updated_at) <= now() - interval '7 days'
+           order by coalesce(d.last_activity_at, d.updated_at) asc limit 4)
+          limit 12`)
+      : Promise.resolve({ rows: [] }),
     recentActivities(ctx, 8),
     canModule(ctx, "financeiro") ? financeSummary(ctx) : Promise.resolve(null),
   ]);
@@ -74,6 +109,15 @@ export async function dashboardData(ctx: Ctx, periodDays = 30) {
     projectsActive: c.projects_active,
     funnel: funnel.rows.map((f) => ({ key: f.key, label: f.label, kind: f.kind, count: f.n, valueCents: Number(f.value) })),
     followups: followups.rows.map((f) => ({ kind: f.kind, id: f.id, title: f.title, companyName: f.company_name, dueAt: new Date(f.due_at), dealId: f.deal_id, overdue: new Date(f.due_at).getTime() < Date.now() })),
+    attentionQueue: attentionRows.rows.map((a) => ({
+      reason: a.reason as "proposta_sem_retorno" | "aguardando_resposta" | "interesse_sem_passo" | "parada",
+      id: a.id,
+      title: a.title,
+      companyName: a.company_name,
+      dealId: a.deal_id,
+      proposalId: a.proposal_id,
+      days: a.days,
+    })),
     recent,
     finance: finance ? { ...finance, receivedPeriodCents: Number(received?.rows[0].total ?? 0) } : null,
   };

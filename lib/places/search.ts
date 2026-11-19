@@ -85,14 +85,8 @@ export async function runSearch(req: SearchRequest): Promise<SearchOutcome> {
   return { ok: true, searchId, found: rows.length, kept: kept.length, calls: 0, partial: rows.length >= MAX_RESULTS, discarded };
 }
 
-async function saveResults(req: SearchRequest, category: Category, radiusM: number, kept: OvRow[], partial: boolean): Promise<string> {
-  const { rows } = await db.execute<{ id: string }>(sql`
-    insert into searches (category, center, radius_m, label, status, api_calls, results)
-    values (${category.id}, ${`SRID=4326;POINT(${req.center.lng} ${req.center.lat})`}::geography, ${radiusM},
-            ${req.label ?? null}, ${partial ? "partial" : "done"}, 0, ${kept.length})
-    returning id`);
-  const searchId = rows[0].id;
-  if (kept.length === 0) return searchId;
+async function upsertSearchPlaces(searchId: string, category: Category, kept: OvRow[]) {
+  if (kept.length === 0) return;
 
   const rowsJson = kept.map((r) => ({
     overture_id: r.id,
@@ -161,5 +155,75 @@ async function saveResults(req: SearchRequest, category: Category, radiusM: numb
     where p.id in (select x::uuid from jsonb_array_elements_text(${idsJson}::jsonb) as x)
     on conflict (place_id) do update set status = 'pending', url = excluded.url, error = null
     where site_audits.audited_at < now() - interval '30 days' or site_audits.status = 'error'`);
+}
+
+async function saveResults(req: SearchRequest, category: Category, radiusM: number, kept: OvRow[], partial: boolean): Promise<string> {
+  const { rows } = await db.execute<{ id: string }>(sql`
+    insert into searches (category, center, radius_m, label, status, api_calls, results)
+    values (${category.id}, ${`SRID=4326;POINT(${req.center.lng} ${req.center.lat})`}::geography, ${radiusM},
+            ${req.label ?? null}, ${partial ? "partial" : "done"}, 0, ${kept.length})
+    returning id`);
+  const searchId = rows[0].id;
+  await upsertSearchPlaces(searchId, category, kept);
   return searchId;
+}
+
+/** Carrega o próximo lote (até 600) de uma busca parcial, deduplicando contra o que já foi retornado. */
+export async function loadMoreSearchResults(searchId: string): Promise<{ ok: true; added: number; hasMore: boolean } | { ok: false; error: string }> {
+  const { rows: searchRows } = await db.execute<{ category: string; radius_m: number; status: string; lat: number; lng: number }>(sql`
+    select category, radius_m, status, ST_Y(center::geometry) as lat, ST_X(center::geometry) as lng
+    from searches where id = ${searchId}`);
+  const s = searchRows[0];
+  if (!s) return { ok: false, error: "Busca não encontrada." };
+  const category = getCategory(s.category);
+  if (!category) return { ok: false, error: "Categoria inválida." };
+  if (s.status !== "partial") return { ok: true, added: 0, hasMore: false };
+
+  const terms = JSON.stringify(category.overtureTerms);
+  const exclude = JSON.stringify(category.overtureExclude ?? []);
+  const center = `SRID=4326;POINT(${Number(s.lng)} ${Number(s.lat)})`;
+
+  const [{ rows: existing }, { rows }] = await Promise.all([
+    db.execute<{ name: string | null; lat: number; lng: number }>(sql`
+      select p.name, ST_Y(p.geom::geometry) as lat, ST_X(p.geom::geometry) as lng
+      from search_results sr join places p on p.id = sr.place_id
+      where sr.search_id = ${searchId}`),
+    db.execute<OvRow>(sql`
+      with t as (select array_agg(x) as terms from jsonb_array_elements_text(${terms}::jsonb) as x)
+      select o.id, o.name, o.brand, o.confidence::text as confidence, o.websites, o.socials, o.emails, o.phones,
+             o.address, o.locality, o.source_count,
+             ST_Y(o.geom::geometry) as lat, ST_X(o.geom::geometry) as lng
+      from ov_places o, t
+      where ST_DWithin(o.geom, ${center}::geography, ${s.radius_m})
+        and (o.basic_category = any(t.terms) or o.taxonomy_primary = any(t.terms) or o.hierarchy && t.terms)
+        and coalesce(o.basic_category, '') not in (select jsonb_array_elements_text(${exclude}::jsonb))
+        and not exists (select 1 from optouts x where x.overture_id = o.id)
+        and not exists (
+          select 1 from search_results sr join places p on p.id = sr.place_id
+          where sr.search_id = ${searchId} and p.overture_id = o.id
+        )
+      order by o.geom <-> ${center}::geography, o.id
+      limit ${MAX_RESULTS}`),
+  ]);
+
+  const kept: OvRow[] = [];
+  const poolCoords = existing.map((e) => ({ name: e.name ?? "", lat: Number(e.lat), lng: Number(e.lng) }));
+  for (const r of rows) {
+    const name = r.name ?? "";
+    if (!name || r.brand || isFranchise(name)) continue;
+    const loc = { lat: Number(r.lat), lng: Number(r.lng) };
+    const dup = poolCoords.find((k) => distanceM({ lat: k.lat, lng: k.lng }, loc) < 60 && nameSimilarity(k.name, name) >= 0.85);
+    if (dup) continue;
+    kept.push(r);
+    poolCoords.push({ name, lat: loc.lat, lng: loc.lng });
+  }
+
+  await upsertSearchPlaces(searchId, category, kept);
+  const hasMore = rows.length >= MAX_RESULTS;
+  await db.execute(sql`
+    update searches
+    set status = ${hasMore ? "partial" : "done"},
+        results = (select count(*)::int from search_results where search_id = ${searchId})
+    where id = ${searchId}`);
+  return { ok: true, added: kept.length, hasMore };
 }

@@ -190,4 +190,78 @@ run("CRM de ponta a ponta (Postgres real)", () => {
     const { GET } = await import("@/app/api/mcp/route");
     expect((await GET()).status).toBe(405);
   });
+
+  it("P0 concorrência e idempotência: pagamento, envio de mensagem, cota Gemini e papéis", async () => {
+    process.env.DATABASE_URL = url;
+    const { db } = await import("@/lib/db");
+    const { crmActivities, crmMessageDrafts, crmPayments, crmTasks, workspaces, workspaceMembers } = await import("@/db/schema");
+    const { and, eq } = await import("drizzle-orm");
+    const ctxm = await import("@/lib/services/ctx");
+    const [ws] = await db.insert(workspaces).values({ name: "p0-" + randomUUID().slice(0, 6) }).returning();
+    await db.insert(workspaceMembers).values({ workspaceId: ws.id, userId: "u-owner", email: "o@t.com", role: "owner" });
+    await ctxm.seedWorkspaceDefaults(ws.id);
+
+    const owner: import("@/lib/services/ctx").Ctx = { workspaceId: ws.id, userId: "u-owner", email: "o@t.com", role: "owner", actor: "user", scope: "write" };
+    const prod: import("@/lib/services/ctx").Ctx = { ...owner, userId: "u-prod", role: "producao" };
+    const fin: import("@/lib/services/ctx").Ctx = { ...owner, userId: "u-fin", role: "financeiro" };
+    const com: import("@/lib/services/ctx").Ctx = { ...owner, userId: "u-com", role: "comercial" };
+
+    const deals = await import("@/lib/services/deals");
+    const finance = await import("@/lib/services/finance");
+    const messages = await import("@/lib/services/messages");
+    const projects = await import("@/lib/services/projects");
+    const gemini = await import("@/lib/ai/gemini");
+
+    const deal = await deals.createDealWithCompany(owner, { company: { name: "Empresa Concorrência", phone: phone() }, deal: { title: "Site", estimatedValueCents: 10000 } });
+
+    // 1. Papéis no banco real
+    await expect(deals.createDeal(prod, { companyId: deal.companyId, title: "X" })).rejects.toThrow(/permissão/i);
+    await expect(projects.createProject(fin, { companyId: deal.companyId, name: "P" })).rejects.toThrow(/permissão/i);
+    await expect(finance.financeSummary(com)).rejects.toThrow(/permissão/i);
+
+    // 2. Pagamento concorrente não ultrapassa o saldo
+    const [rec] = await finance.createReceivables(owner, { companyId: deal.companyId, dealId: deal.id, description: "Parcela única", amountCents: 10000, dueDate: "2026-12-01" });
+    const payResults = await Promise.allSettled(
+      Array.from({ length: 5 }, () => finance.registerPayment(owner, { receivableId: rec.id, amountCents: 6000, paidAt: "2026-11-18", method: "pix" })),
+    );
+    expect(payResults.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(payResults.filter((r) => r.status === "rejected")).toHaveLength(4);
+    const payments = await db.select().from(crmPayments).where(eq(crmPayments.receivableId, rec.id));
+    expect(payments).toHaveLength(1);
+    expect(payments[0].amountCents).toBe(6000);
+
+    // 3. Confirmação de envio idempotente por idempotencyKey (concorrente)
+    const idemKey = `confirm-${randomUUID()}`;
+    const sendResults = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        messages.registerSent(owner, {
+          draft: { companyId: deal.companyId, dealId: deal.id, objective: "primeiro_contato", body: "Olá! Mensagem única.", channel: "whatsapp" },
+          idempotencyKey: idemKey,
+          channel: "whatsapp",
+        }),
+      ),
+    );
+    const draftIds = new Set(sendResults.map((d) => d.id));
+    expect(draftIds.size).toBe(1);
+    const acts = await db.select().from(crmActivities).where(and(eq(crmActivities.dealId, deal.id), eq(crmActivities.kind, "mensagem_enviada")));
+    expect(acts).toHaveLength(1);
+    const tasks = await db.select().from(crmTasks).where(and(eq(crmTasks.dealId, deal.id), eq(crmTasks.source, "automacao")));
+    expect(tasks).toHaveLength(1);
+
+    // 4. Reutilização de rascunho salvo em registerSent
+    const saved = await messages.saveDraft(owner, { companyId: deal.companyId, dealId: deal.id, objective: "follow_up", body: "Rascunho prévio", channel: "whatsapp" });
+    const [s1, s2] = await Promise.all([
+      messages.registerSent(owner, { draft: { companyId: deal.companyId, dealId: deal.id, objective: "follow_up", body: "Rascunho editado", channel: "whatsapp" }, draftId: saved.id, channel: "whatsapp" }),
+      messages.registerSent(owner, { draft: { companyId: deal.companyId, dealId: deal.id, objective: "follow_up", body: "Rascunho editado", channel: "whatsapp" }, draftId: saved.id, channel: "whatsapp" }),
+    ]);
+    expect(s1.id).toBe(saved.id);
+    expect(s2.id).toBe(saved.id);
+    const allDrafts = await db.select().from(crmMessageDrafts).where(eq(crmMessageDrafts.dealId, deal.id));
+    expect(allDrafts).toHaveLength(2); // 1 do teste anterior + 1 reutilizado
+
+    // 5. Cota do Gemini concorrente respeita o limite diário
+    const quotaAttempts = await Promise.all(["mensagem", "resumo", "proxima_acao", "tarefas", "mensagem"].map((f) => gemini.reserveAiQuota(owner, f as "mensagem", 2)));
+    expect(quotaAttempts.filter(Boolean)).toHaveLength(2);
+    expect((await gemini.aiUsageToday(owner)).calls).toBe(2);
+  });
 });

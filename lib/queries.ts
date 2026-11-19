@@ -28,6 +28,9 @@ type Row = {
   google_website: string | null;
   google_maps_uri: string | null;
   audit_status: string | null;
+  audit_error: string | null;
+  audited_at: string | null;
+  scored_at: string | null;
   site_type: RadarPlace["siteType"];
   https: boolean | null;
   viewport: boolean | null;
@@ -42,6 +45,8 @@ type Row = {
   lead_id: string | null;
   lead_stage: string | null;
   company_id: string | null;
+  company_metadata: { ignoredAt?: string | null; snoozeUntil?: string | null } | null;
+  has_draft: boolean;
   opted_out: boolean;
 };
 
@@ -51,13 +56,14 @@ const base = (ws: string | null) => sql`
   select p.id, p.source, p.overture_id, p.google_place_id, p.website, p.phone, p.confidence::text as confidence, p.source_count, p.name, p.category, p.address, p.neighborhood, p.city,
          ST_Y(p.geom::geometry) as lat, ST_X(p.geom::geometry) as lng,
          p.rating::text as rating, p.rating_count, p.google_phone, p.google_website, p.google_maps_uri,
-         a.status as audit_status, a.site_type, a.https, a.viewport, a.psi_performance, a.has_booking,
+         a.status as audit_status, a.error as audit_error, a.audited_at, s.scored_at, a.site_type, a.https, a.viewport, a.psi_performance, a.has_booking,
          a.has_services_page, a.approachable, a.signals,
          s.total as score, s.rules,
          (select coalesce(jsonb_agg(jsonb_build_object('kind', c.kind, 'value', c.value, 'source', c.source, 'confirmed', c.confirmed)
                  order by c.confirmed desc, c.kind), '[]'::jsonb)
             from place_contacts c where c.place_id = p.id) as contacts,
-         l.deal_id as lead_id, l.stage_key as lead_stage, l.company_id,
+         l.deal_id as lead_id, l.stage_key as lead_stage, l.company_id, l.company_metadata,
+         ${ws ? sql`exists(select 1 from crm_message_drafts md where md.workspace_id = ${ws} and md.company_id = l.company_id and md.status = 'rascunho')` : sql`false`} as has_draft,
          exists(select 1 from optouts o
                 where o.google_place_id = p.google_place_id
                    or o.overture_id = p.overture_id
@@ -67,7 +73,7 @@ const base = (ws: string | null) => sql`
   left join site_audits a on a.place_id = p.id
   left join lead_scores s on s.place_id = p.id
   left join lateral (
-    select d.id as deal_id, st.key as stage_key, c.id as company_id
+    select d.id as deal_id, st.key as stage_key, c.id as company_id, c.metadata as company_metadata
     from crm_companies c
     left join crm_deals d on d.company_id = c.id
     left join crm_stages st on st.id = d.stage_id
@@ -109,6 +115,9 @@ function toPlace(r: Row): RadarPlace {
     googleWebsite: site,
     googleMapsUri: r.google_maps_uri,
     auditStatus: r.audit_status,
+    auditError: r.audit_error ?? null,
+    auditedAt: r.audited_at ? new Date(r.audited_at).toISOString() : null,
+    scoredAt: r.scored_at ? new Date(r.scored_at).toISOString() : null,
     siteType: r.site_type,
     https: r.https,
     viewport: r.viewport,
@@ -123,6 +132,9 @@ function toPlace(r: Row): RadarPlace {
     leadId: r.lead_id,
     leadStage: r.lead_stage,
     companyId: r.company_id,
+    ignored: Boolean(r.company_metadata?.ignoredAt),
+    snoozedUntil: r.company_metadata?.snoozeUntil ?? null,
+    hasDraft: Boolean(r.has_draft),
     optedOut: r.opted_out,
   };
 }
@@ -148,7 +160,8 @@ export async function searchResults(searchId: string, ws: string | null = null) 
   }>(sql`select id, category, radius_m, label, status, api_calls, results, ST_Y(center::geometry) as lat, ST_X(center::geometry) as lng, created_at
           from searches where id = ${searchId}`);
   const pending = places.filter((p) => p.auditStatus === "pending" || p.auditStatus === "running").length;
-  return { search: rows[0] ?? null, places, pending };
+  const failed = places.filter((p) => p.auditStatus === "error").length;
+  return { search: rows[0] ?? null, places, pending, failed, hasMore: rows[0]?.status === "partial" };
 }
 
 export async function recentSearches(limit = 8) {

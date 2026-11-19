@@ -2,6 +2,7 @@
 
 import { Check, FileText, FolderKanban, Loader2, MessageSquareText, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { StageBadge, ScorePill } from "@/components/crm/common";
@@ -9,6 +10,7 @@ import { Badge, priorityTone } from "@/components/ui/kit";
 import { Dialog, SlideOver, useRun, useToast } from "@/components/ui/overlays";
 import { MoneyInput } from "@/components/ui/money-input";
 import { nextActionAction, suggestTasksAction, summarizeDealAction } from "@/lib/actions/ai";
+import { createProposalAction } from "@/lib/actions/business";
 import { addNoteAction, convertDealAction, dealDetailAction, moveDealAction, optOutCompanyAction, updateDealAction } from "@/lib/actions/crm";
 import { completeTaskAction, createTaskAction } from "@/lib/actions/tasks";
 import { LOST_REASONS, SERVICE_TYPES, labelOf, PRIORITIES, PROPOSAL_STATUS, sourceLabel } from "@/lib/config/crm";
@@ -67,9 +69,9 @@ export function DealDrawer({ dealId, stages, onClose, onChanged, aiEnabled }: { 
       {data && (
         <div className="flex h-full flex-col">
           <Actions data={data} stages={stages} onChanged={changed} />
-          <div role="tablist" className="flex gap-1 border-b border-line px-4">
+          <div role="tablist" aria-label="Abas da oportunidade" className="flex gap-1 overflow-x-auto border-b border-line px-4">
             {([["geral", "Visão geral"], ["historico", "Histórico"], ["tarefas", `Tarefas (${data.tasks.filter((t) => t.status !== "concluida" && t.status !== "cancelada").length})`], ["propostas", `Propostas (${data.proposals.length})`]] as [Tab, string][]).map(([k, l]) => (
-              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === k ? "border-brand font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>
+              <button type="button" key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm ${tab === k ? "border-brand font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>
             ))}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -85,6 +87,7 @@ export function DealDrawer({ dealId, stages, onClose, onChanged, aiEnabled }: { 
 }
 
 function Actions({ data, stages, onChanged }: { data: Detail; stages: StageOption[]; onChanged: () => void }) {
+  const router = useRouter();
   const { run, pending } = useRun();
   const [lostOpen, setLostOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
@@ -108,9 +111,16 @@ function Actions({ data, stages, onChanged }: { data: Detail; stages: StageOptio
           {stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
         {!blockedByOptOut && (
-          <Link href={`/mensagens?empresa=${c.companyId}&oportunidade=${c.id}`} className="btn btn-ghost btn-sm"><MessageSquareText className="h-4 w-4" /> Mensagem</Link>
+          <Link href={`/mensagens?empresa=${c.companyId}&oportunidade=${c.id}${c.serviceType ? `&servico=${encodeURIComponent(c.serviceType)}` : ""}`} className="btn btn-ghost btn-sm"><MessageSquareText className="h-4 w-4" /> Mensagem</Link>
         )}
-        <Link href={`/propostas?novo=1&empresa=${c.companyId}&oportunidade=${c.id}`} className="btn btn-ghost btn-sm"><FileText className="h-4 w-4" /> Proposta</Link>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => run(() => createProposalAction({ companyId: c.companyId, dealId: c.id, title: `Proposta — ${c.title}`, items: [] }), { onOk: (p) => router.push(`/propostas/${p.id}`), refresh: false })}
+          className="btn btn-ghost btn-sm"
+        >
+          <FileText className="h-4 w-4" /> Proposta
+        </button>
         {data.project ? (
           <Link href={`/projetos/${data.project.id}`} className="btn btn-ghost btn-sm"><FolderKanban className="h-4 w-4" /> Ver projeto</Link>
         ) : (
@@ -349,9 +359,18 @@ function Tasks({ data, onChanged }: { data: Detail; onChanged: () => void }) {
 }
 
 function Proposals({ data }: { data: Detail }) {
+  const router = useRouter();
+  const { run, pending } = useRun();
   return (
     <div className="space-y-3">
-      <Link href={`/propostas?novo=1&empresa=${data.card.companyId}&oportunidade=${data.card.id}`} className="btn btn-ghost btn-sm"><Plus className="h-4 w-4" /> Nova proposta</Link>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => run(() => createProposalAction({ companyId: data.card.companyId, dealId: data.card.id, title: `Proposta — ${data.card.title}`, items: [] }), { onOk: (p) => router.push(`/propostas/${p.id}`), refresh: false })}
+        className="btn btn-ghost btn-sm"
+      >
+        <Plus className="h-4 w-4" /> Nova proposta
+      </button>
       {data.proposals.length === 0 ? <p className="text-sm text-muted">Nenhuma proposta ainda.</p> : (
         <ul className="space-y-1.5">
           {data.proposals.map((p) => (

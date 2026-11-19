@@ -23,18 +23,33 @@ export function aiConfig() {
   };
 }
 
+/** Garante que o Gemini está configurado/habilitado antes de consultar dados no banco. */
+export function assertAiEnabled() {
+  const cfg = aiConfig();
+  if (!cfg.enabled) throw new AiError("A IA não está configurada (GEMINI_API_KEY ausente). Use os modelos e a escrita manual.");
+  return cfg;
+}
+
 export type AiFeature = "mensagem" | "resumo" | "proxima_acao" | "tarefas";
 
-/** Reserva 1 chamada do limite diário (atômico). Falso = limite atingido. */
-async function reserve(ctx: Ctx, feature: AiFeature, limit: number): Promise<boolean> {
+/** Reserva 1 chamada do limite diário (atômico com advisory lock por workspace/dia). Falso = limite atingido. */
+export async function reserveAiQuota(ctx: Ctx, feature: AiFeature, limit: number): Promise<boolean> {
   const day = ymdSP();
-  const { rows } = await db.execute<{ calls: number }>(sql`
-    with total as (select coalesce(sum(calls),0)::int as n from ai_usage where workspace_id = ${ctx.workspaceId} and day = ${day}::date)
-    insert into ai_usage (workspace_id, day, feature, calls)
-    select ${ctx.workspaceId}, ${day}::date, ${feature}, 1 from total where total.n < ${limit}
-    on conflict (workspace_id, day, feature) do update set calls = ai_usage.calls + 1
-    returning calls`);
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.workspaceId + ":" + day}))`);
+    const { rows: totalRows } = await tx.execute<{ n: number }>(sql`
+      select coalesce(sum(calls), 0)::int as n
+      from ai_usage
+      where workspace_id = ${ctx.workspaceId} and day = ${day}::date
+    `);
+    if ((totalRows[0]?.n ?? 0) >= limit) return false;
+    await tx.execute(sql`
+      insert into ai_usage (workspace_id, day, feature, calls)
+      values (${ctx.workspaceId}, ${day}::date, ${feature}, 1)
+      on conflict (workspace_id, day, feature) do update set calls = ai_usage.calls + 1
+    `);
+    return true;
+  });
 }
 async function markError(ctx: Ctx, feature: AiFeature) {
   await db.execute(sql`update ai_usage set errors = errors + 1 where workspace_id = ${ctx.workspaceId} and day = ${ymdSP()}::date and feature = ${feature}`).catch(() => null);
@@ -62,9 +77,8 @@ function friendly(e: unknown): AiError {
  * Logs só têm recurso, modelo, status e duração — nunca o conteúdo.
  */
 export async function generateJson<S extends z.ZodTypeAny>(ctx: Ctx, feature: AiFeature, input: { system: string; user: string; schema: S; temperature?: number; maxOutputTokens?: number }): Promise<z.output<S>> {
-  const cfg = aiConfig();
-  if (!cfg.enabled) throw new AiError("A IA não está configurada (GEMINI_API_KEY ausente). Use os modelos e a escrita manual.");
-  if (!(await reserve(ctx, feature, cfg.dailyLimit))) throw new AiError(`Limite diário de ${cfg.dailyLimit} chamadas de IA atingido. Volte amanhã ou use o modo manual.`);
+  const cfg = assertAiEnabled();
+  if (!(await reserveAiQuota(ctx, feature, cfg.dailyLimit))) throw new AiError(`Limite diário de ${cfg.dailyLimit} chamadas de IA atingido. Volte amanhã ou use o modo manual.`);
   const started = Date.now();
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { timeout: 25_000 } });

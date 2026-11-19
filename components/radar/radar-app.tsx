@@ -4,7 +4,7 @@ import { Check, ChevronLeft, Crosshair, Flame, History, Loader2, MapPin, Pencil,
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 
-import { openInStudioAction, searchAction } from "@/app/actions";
+import { loadMoreRadarAction, openInStudioAction, prospectStateAction, retryAuditsAction, searchAction } from "@/app/actions";
 import { badgesFor } from "@/components/lead/badges";
 import { LeadPanel } from "@/components/lead/lead-panel";
 import { RadarMap } from "@/components/radar/radar-map";
@@ -13,15 +13,17 @@ import { addPlaceToCrmAction } from "@/lib/actions/crm";
 import { CATEGORIES, CITIES, getCategory } from "@/lib/config/categories";
 import { relativeDays } from "@/lib/dates";
 import { distanceM, type LatLng } from "@/lib/geo";
+import { APPROACH_STATUS_LABEL, buildProspectQueue, deriveApproachStatus, isHiddenFromQueue, type QueueItem } from "@/lib/prospecting";
+import { contactCapabilities, isNextApproachable, isPriorityLead, nextPollDelayMs } from "@/lib/radar-signals";
 import { normalize } from "@/lib/text";
 import type { RadarPlace } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 
 type Recent = { id: string; category: string; radius_m: number; label: string | null; results: number; created_at: string | Date };
 type Info = { total: number; release: string | null };
-type Filter = "todos" | "quentes" | "sem_site" | "abordaveis";
+type Filter = "todos" | "prioritarios" | "com_contato" | "sem_site" | "no_crm" | "ignorados";
 type SearchMeta = { lat: number; lng: number; radius_m: number; category: string; label?: string | null; created_at?: string };
-type Results = { places: RadarPlace[]; pending: number; search: SearchMeta | null };
+type Results = { places: RadarPlace[]; pending: number; failed?: number; hasMore?: boolean; search: SearchMeta | null };
 
 /** Modo demonstração (página /dev-preview/radar): dados de exemplo, sem servidor. */
 export type RadarDemo = { places: RadarPlace[]; label: string; category: string; radiusKm: number; selectedId?: string; mode?: "busca" | "resultados" };
@@ -70,6 +72,12 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
   const [searchedAt, setSearchedAt] = useState<Date | null>(null);
   const [places, setPlaces] = useState<RadarPlace[]>(demo?.places ?? []);
   const [pendingAudits, setPendingAudits] = useState(demo ? demo.places.filter((p) => p.score == null).length : 0);
+  const [failedAudits, setFailedAudits] = useState(demo ? demo.places.filter((p) => p.auditStatus === "error").length : 0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, startLoadMore] = useTransition();
+  const [retryingAudits, startRetryAudits] = useTransition();
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [pollGeneration, setPollGeneration] = useState(0);
   const [mode, setMode] = useState<"busca" | "resultados">(demo?.mode ?? (initialSearchId ? "resultados" : "busca"));
   const [selectedId, setSelectedId] = useState<string | null>(demo?.selectedId ?? null);
   const [message, setMessage] = useState<string | null>(null);
@@ -78,6 +86,11 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
   const [searching, startSearch] = useTransition();
   const [approaching, startApproach] = useTransition();
   const processing = useRef(false);
+  const activeSearchRef = useRef<string | null>(searchId);
+
+  useEffect(() => {
+    activeSearchRef.current = searchId;
+  }, [searchId]);
 
   // preferências salvas neste navegador (depois da montagem, para não divergir do HTML do servidor)
   useEffect(() => {
@@ -106,25 +119,31 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
     };
   }, [demo]);
 
-  const loadResults = useCallback(async (id: string): Promise<Results | undefined> => {
-    const r = await fetch(`/api/radar/${id}`, { cache: "no-store" });
-    if (!r.ok) return;
+  const loadResults = useCallback(async (id: string, signal?: AbortSignal): Promise<Results | undefined> => {
+    const r = await fetch(`/api/radar/${id}`, { cache: "no-store", signal });
+    if (!r.ok) throw new Error(`Falha ao carregar resultados (HTTP ${r.status}).`);
     const j = (await r.json()) as Results;
+    if (signal?.aborted || activeSearchRef.current !== id) return;
     setPlaces(j.places);
     setPendingAudits(j.pending);
+    setFailedAudits(j.failed ?? j.places.filter((p) => p.auditStatus === "error").length);
+    setHasMore(Boolean(j.hasMore));
     return j;
   }, []);
 
   // abre uma busca salva (?busca=)
   useEffect(() => {
     if (!initialSearchId || demo) return;
+    const ac = new AbortController();
     let alive = true;
-    fetch(`/api/radar/${initialSearchId}`, { cache: "no-store" })
+    fetch(`/api/radar/${initialSearchId}`, { cache: "no-store", signal: ac.signal })
       .then((r) => (r.ok ? (r.json() as Promise<Results>) : null))
       .then((j) => {
-        if (!alive || !j) return;
+        if (!alive || ac.signal.aborted || !j) return;
         setPlaces(j.places);
         setPendingAudits(j.pending);
+        setFailedAudits(j.failed ?? j.places.filter((p) => p.auditStatus === "error").length);
+        setHasMore(Boolean(j.hasMore));
         if (j.search) {
           const c = { lat: Number(j.search.lat), lng: Number(j.search.lng) };
           setCenter(c);
@@ -134,28 +153,72 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
           setCityId(CITIES.find((x) => Math.abs(x.lat - c.lat) < 0.001 && Math.abs(x.lng - c.lng) < 0.001)?.id ?? "mapa");
           if (j.search.created_at) setSearchedAt(new Date(j.search.created_at));
         }
+      })
+      .catch((e) => {
+        if (!alive || ac.signal.aborted) return;
+        if (e instanceof Error && e.name === "AbortError") return;
+        setMessage("Não foi possível carregar os resultados desta busca.");
       });
     return () => {
       alive = false;
+      ac.abort();
     };
   }, [initialSearchId, demo]);
 
-  // enquanto houver análise pendente: roda um lote e recarrega
+  // enquanto houver análise pendente: roda um lote por vez com backoff, tratamento de erro e cancelamento
   useEffect(() => {
     if (demo || !searchId || pendingAudits === 0) return;
-    const t = setInterval(async () => {
-      if (!processing.current) {
-        processing.current = true;
-        fetch("/api/audits/process", { method: "POST" }).finally(() => (processing.current = false));
+    const ac = new AbortController();
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveErrors = 0;
+
+    const tick = async () => {
+      if (!active || ac.signal.aborted) return;
+      try {
+        if (!processing.current) {
+          processing.current = true;
+          try {
+            const procRes = await fetch("/api/audits/process", { method: "POST", signal: ac.signal });
+            if (!procRes.ok) throw new Error(`HTTP ${procRes.status}`);
+          } finally {
+            processing.current = false;
+          }
+        }
+        await loadResults(searchId, ac.signal);
+        if (!active || ac.signal.aborted) return;
+        consecutiveErrors = 0;
+        setPollError(null);
+      } catch (e) {
+        if (!active || ac.signal.aborted || (e instanceof Error && e.name === "AbortError")) return;
+        consecutiveErrors++;
+        const nextDelay = nextPollDelayMs(consecutiveErrors);
+        if (nextDelay == null) {
+          setPollError("Análise automática pausada após erros seguidos.");
+          return;
+        }
+        setPollError("Falha ao atualizar análises. Tentando novamente…");
       }
-      await loadResults(searchId);
-    }, 3000);
-    return () => clearInterval(t);
-  }, [searchId, pendingAudits, loadResults, demo]);
+
+      if (!active || ac.signal.aborted) return;
+      const delay = nextPollDelayMs(consecutiveErrors);
+      if (delay != null) {
+        timer = setTimeout(tick, delay);
+      }
+    };
+
+    timer = setTimeout(tick, 3000);
+    return () => {
+      active = false;
+      ac.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [searchId, pendingAudits, loadResults, demo, pollGeneration]);
 
   const runSearch = () =>
     startSearch(async () => {
       setMessage(null);
+      setPollError(null);
       setSelectedId(null);
       const label = `${cat?.label ?? category} · ${placeLabel} · ${fmtKm(radiusKm)}`;
       const out = await searchAction({ category, lat: center.lat, lng: center.lng, radiusM: radiusKm * 1000, label });
@@ -166,51 +229,80 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
       const d = out.discarded;
       const removed = d.franquia + d.fechado + d.duplicado;
       setMessage(
-        (out.partial ? "Muitos resultados: mostrando os 600 mais perto do centro. " : "") +
+        (out.partial ? "Mais de 600 negócios na região: mostrando os 600 mais perto do centro (use “Carregar mais” no fim da lista). " : "") +
           (removed ? `${removed} descartados (${d.franquia} redes/franquias, ${d.duplicado} duplicados).` : ""),
       );
+      activeSearchRef.current = out.searchId;
       setSearchId(out.searchId);
       setSearchedAt(new Date());
       setMode("resultados");
       setFilter("todos");
       window.history.replaceState(null, "", `/radar?busca=${out.searchId}`);
-      await loadResults(out.searchId);
+      await loadResults(out.searchId).catch(() => setMessage("Busca salva, mas falhou ao carregar os resultados."));
     });
 
   const stats = useMemo(() => {
-    const semSite = places.filter((p) => p.siteType === "sem_site" || p.siteType === "so_rede_social").length;
-    const quentes = places.filter((p) => (p.score ?? 0) >= 75).length;
-    const oportunidades = places.filter((p) => p.approachable !== false && !p.optedOut && (p.score ?? 0) >= 50).length;
-    return { semSite, quentes, oportunidades };
+    const active = places.filter((p) => !isHiddenFromQueue(p));
+    const semSite = active.filter((p) => p.siteType === "sem_site" || p.siteType === "so_rede_social").length;
+    const prioritarios = active.filter((p) => isPriorityLead(p)).length;
+    const comContato = active.filter((p) => contactCapabilities(p).hasUsableContact).length;
+    const noCrm = active.filter((p) => Boolean(p.leadId)).length;
+    const ignorados = places.length - active.length;
+    return { semSite, prioritarios, comContato, noCrm, ignorados, activeTotal: active.length };
   }, [places]);
+
+  const queue = useMemo(() => buildProspectQueue(places, { offer, limit: 4 }), [places, offer]);
 
   const visible = useMemo(
     () =>
       [...places]
         .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
         .filter((p) => {
-          if (filter === "quentes") return (p.score ?? 0) >= 75;
+          const hidden = isHiddenFromQueue(p);
+          if (filter === "ignorados") return hidden;
+          if (hidden) return false;
+          if (filter === "prioritarios") return isPriorityLead(p);
+          if (filter === "com_contato") return contactCapabilities(p).hasUsableContact;
           if (filter === "sem_site") return p.siteType === "sem_site" || p.siteType === "so_rede_social";
-          if (filter === "abordaveis") return p.approachable !== false && (p.score ?? 0) >= 50;
+          if (filter === "no_crm") return Boolean(p.leadId);
           return true;
         }),
     [places, filter],
   );
 
-  const hotNotInCrm = places.filter((p) => (p.score ?? 0) >= 75 && p.approachable !== false && !p.leadId && !p.optedOut);
-  // "Abordar agora": o melhor negócio com contato que ainda não foi abordado
-  const next = visible.find((p) => p.approachable !== false && !p.optedOut && (!p.leadStage || p.leadStage === "novo" || p.leadStage === "qualificado") && p.score != null);
+  const hotNotInCrm = places.filter((p) => !isHiddenFromQueue(p) && isPriorityLead(p) && !p.leadId);
+  // "Abordar agora": melhor negócio com contato utilizável que ainda não foi abordado
+  const next = visible.find((p) => isNextApproachable(p));
 
-  const approach = () =>
+  const approachPlace = (placeId: string) =>
     startApproach(async () => {
-      if (!next || demo) return;
-      const r = await openInStudioAction(next.id);
+      if (demo) return;
+      const r = await openInStudioAction(placeId, offer);
       if (!r.ok) {
         setMessage(r.error);
         return;
       }
-      router.push(`/mensagens?empresa=${r.data.companyId}&oportunidade=${r.data.dealId}`);
+      const qs = new URLSearchParams({ empresa: r.data.companyId, oportunidade: r.data.dealId });
+      if (r.data.serviceType) qs.set("servico", r.data.serviceType);
+      router.push(`/mensagens?${qs.toString()}`);
     });
+
+  const approach = () => {
+    if (next) approachPlace(next.id);
+  };
+
+  const handleProspect = async (placeId: string, action: "ignorar" | "adiar" | "contatado" | "restaurar") => {
+    if (demo) return;
+    const r = await prospectStateAction(
+      placeId,
+      action === "adiar" ? { action: "adiar", days: 7 } : action === "contatado" ? { action: "contatado", offer } : { action },
+    );
+    if (!r.ok) {
+      setMessage(r.error);
+      return;
+    }
+    if (searchId) await loadResults(searchId).catch(() => {});
+  };
 
   const chip = `${cat?.plural ?? "negócios"} · ${placeLabel === "ponto no mapa" ? "ponto no mapa" : `${placeLabel}, GO`} · ${fmtKm(radiusKm)}`;
   const ChipIcon = CATEGORY_ICON[category] ?? Radar;
@@ -293,6 +385,7 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
         ) : (
           <ResultsView
             places={visible}
+            queue={queue}
             center={center}
             total={places.length}
             stats={stats}
@@ -302,6 +395,39 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
               writeLocal(TICKET_KEY, String(v));
             }}
             pending={pendingAudits}
+            failed={failedAudits}
+            pollError={pollError}
+            retryingAudits={retryingAudits}
+            onRetryAudits={() => {
+              if (!searchId || demo) return;
+              startRetryAudits(async () => {
+                const failedIds = places.filter((p) => p.auditStatus === "error").map((p) => p.id);
+                if (failedIds.length > 0) {
+                  const r = await retryAuditsAction(failedIds);
+                  if (!r.ok) {
+                    setMessage(r.error);
+                    return;
+                  }
+                }
+                setPollError(null);
+                setPollGeneration((g) => g + 1);
+                await loadResults(searchId).catch(() => {});
+              });
+            }}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => {
+              if (!searchId || demo) return;
+              startLoadMore(async () => {
+                const r = await loadMoreRadarAction(searchId);
+                if (!r.ok) {
+                  setMessage(r.error);
+                  return;
+                }
+                setMessage(r.data.added > 0 ? `${r.data.added} novos lugares carregados.` : "Não há mais lugares novos nesta área.");
+                await loadResults(searchId).catch(() => {});
+              });
+            }}
             filter={filter}
             onFilter={setFilter}
             selectedId={selectedId}
@@ -315,12 +441,15 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
             onAddHot={async () => {
               if (demo) return;
               const r = await addPlaceToCrmAction(hotNotInCrm.map((p) => p.id));
-              setMessage(r.ok ? `${r.data.created} leads quentes adicionados ao CRM${r.data.existing ? ` (${r.data.existing} já estavam)` : ""}.` : r.error);
-              if (searchId) await loadResults(searchId);
+              setMessage(r.ok ? `${r.data.created} leads prioritários adicionados ao CRM${r.data.existing ? ` (${r.data.existing} já estavam)` : ""}.` : r.error);
+              if (searchId) await loadResults(searchId).catch(() => {});
             }}
             canApproach={!!next && !demo}
             approaching={approaching}
             onApproach={approach}
+            onApproachPlace={approachPlace}
+            onProspect={handleProspect}
+            demo={!!demo}
             onBack={() => {
               setMode("busca");
               setSelectedId(null);
@@ -336,9 +465,10 @@ export function RadarApp({ recent, initialSearchId, demo }: { recent: Recent[]; 
             key={selectedId}
             placeId={selectedId}
             center={center}
+            offer={offer}
             demo={demo?.places.find((p) => p.id === selectedId)}
             onClose={() => setSelectedId(null)}
-            onChanged={() => searchId && !demo && loadResults(searchId)}
+            onChanged={() => searchId && !demo && void loadResults(searchId).catch(() => {})}
           />
         </div>
       )}
@@ -581,12 +711,20 @@ function Combo({ id, icon: Icon, placeholder, value, options, onPick, clearable 
 
 function ResultsView(props: {
   places: RadarPlace[];
+  queue: QueueItem[];
   center: LatLng;
   total: number;
-  stats: { semSite: number; quentes: number; oportunidades: number };
+  stats: { semSite: number; prioritarios: number; comContato: number; noCrm: number; ignorados: number; activeTotal: number };
   ticket: number;
   onTicket: (v: number) => void;
   pending: number;
+  failed: number;
+  pollError: string | null;
+  retryingAudits: boolean;
+  onRetryAudits: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   filter: Filter;
   onFilter: (f: Filter) => void;
   selectedId: string | null;
@@ -601,9 +739,12 @@ function ResultsView(props: {
   canApproach: boolean;
   approaching: boolean;
   onApproach: () => void;
+  onApproachPlace: (id: string) => void;
+  onProspect: (id: string, action: "ignorar" | "adiar" | "contatado" | "restaurar") => Promise<void>;
+  demo: boolean;
   onBack: () => void;
 }) {
-  const { places, total, stats, ticket, pending } = props;
+  const { places, queue, total, stats, ticket, pending, failed } = props;
   const now = useNow();
   const [editingTicket, setEditingTicket] = useState(false);
   const cat = getCategory(props.category);
@@ -611,10 +752,12 @@ function ResultsView(props: {
   const analyzed = total - pending;
   const pct = total ? Math.round((analyzed / total) * 100) : 0;
   const filters: [Filter, string, number][] = [
-    ["todos", "Todos", total],
-    ["quentes", "Quentes", stats.quentes],
-    ["sem_site", "Sem site", stats.semSite],
-    ["abordaveis", "Com contato", stats.oportunidades],
+    ["todos", "Todos", stats.activeTotal],
+    ["prioritarios", "Prioritários", stats.prioritarios],
+    ["com_contato", "Com contato", stats.comContato],
+    ["sem_site", "Sem site nos dados", stats.semSite],
+    ["no_crm", "Já no CRM", stats.noCrm],
+    ...(stats.ignorados > 0 ? ([["ignorados", "Ignorados/Adiados", stats.ignorados]] as [Filter, string, number][]) : []),
   ];
   const when = props.searchedAt ? (now - props.searchedAt.getTime() < 90_000 ? "agora" : relativeDays(props.searchedAt) === "hoje" ? `há ${Math.max(1, Math.round((now - props.searchedAt.getTime()) / 60_000))} min` : relativeDays(props.searchedAt)) : null;
 
@@ -635,15 +778,15 @@ function ResultsView(props: {
             {total} {total === 1 ? cat?.label.toLowerCase() ?? "negócio" : cat?.plural ?? "negócios"}
           </h1>
           <p className="mt-1 text-[15px] text-muted">
-            {stats.semSite} sem site próprio · {stats.quentes} {stats.quentes === 1 ? "quente" : "quentes"}
+            {stats.semSite} sem site nos dados · {stats.prioritarios} {stats.prioritarios === 1 ? "prioritário" : "prioritários"}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-brand/15 bg-gradient-to-br from-brand-soft to-surface p-4">
-          <div className="text-sm font-medium text-brand">Dinheiro em jogo</div>
-          <div className="mt-1 font-heading text-[34px] leading-none tabular-nums">{brl.format(stats.oportunidades * ticket)}</div>
-          <div className="mt-2 flex items-center gap-1.5 text-sm text-muted">
-            {stats.oportunidades} × {""}
+        <div className="rounded-2xl border border-line bg-background p-4">
+          <div className="text-xs font-medium text-muted">Potencial bruto hipotético (100% de conversão)</div>
+          <div className="mt-1 font-heading text-[28px] leading-none tabular-nums">{brl.format(stats.comContato * ticket)}</div>
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+            {stats.comContato} com contato × {""}
             {editingTicket ? (
               <input
                 autoFocus
@@ -662,7 +805,7 @@ function ResultsView(props: {
               />
             ) : (
               <>
-                {brl.format(ticket)}, o seu preço
+                {brl.format(ticket)} (não é previsão de faturamento)
                 <button type="button" onClick={() => setEditingTicket(true)} className="rounded p-1 hover:bg-fg/8 hover:text-fg" aria-label="Mudar o seu preço">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -676,7 +819,7 @@ function ResultsView(props: {
           onClick={props.onApproach}
           disabled={!props.canApproach || props.approaching}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand py-3.5 text-[15px] font-semibold text-brand-on shadow-[0_12px_28px_-12px_var(--brand)] transition hover:bg-brand-hover disabled:opacity-50"
-          title="Abre o próximo negócio com contato no Estúdio de Mensagens"
+          title="Abre o próximo negócio prioritário com contato no Estúdio de Mensagens"
         >
           {props.approaching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5" aria-hidden />}
           Abordar agora
@@ -698,6 +841,17 @@ function ResultsView(props: {
           </div>
         )}
 
+        {(props.pollError || failed > 0) && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-xs">
+            <span className="text-warn">
+              {props.pollError ?? `${failed} ${failed === 1 ? "site falhou na auditoria" : "sites falharam na auditoria"}.`}
+            </span>
+            <button type="button" disabled={props.retryingAudits} onClick={props.onRetryAudits} className="shrink-0 font-medium text-brand hover:underline disabled:opacity-50">
+              {props.retryingAudits ? "Tentando…" : "Tentar novamente"}
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-1.5">
           {filters.map(([v, l, n]) => (
             <button key={v} type="button" aria-pressed={props.filter === v} onClick={() => props.onFilter(v)} className={`rounded-full border px-3 py-1 text-xs transition ${props.filter === v ? "border-fg bg-fg text-background" : "border-line text-muted hover:text-fg"}`}>
@@ -706,17 +860,57 @@ function ResultsView(props: {
           ))}
           {props.hotCount > 0 && (
             <button type="button" onClick={props.onAddHot} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-              <Flame className="h-3.5 w-3.5" aria-hidden /> {props.hotCount} quentes → CRM
+              <Flame className="h-3.5 w-3.5" aria-hidden /> {props.hotCount} prioritários → CRM
             </button>
           )}
         </div>
         {props.message && <p className="text-xs text-muted">{props.message}</p>}
+
+        {queue.length > 0 && props.filter !== "ignorados" && (
+          <div className="rounded-2xl border border-brand/20 bg-brand-soft/45 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs font-medium text-brand">
+              <span>Fila inteligente do dia</span>
+              <span className="text-muted">{queue.length} sugeridos</span>
+            </div>
+            <ul className="space-y-2">
+              {queue.map((item) => (
+                <li key={item.place.id} className="rounded-xl border border-line bg-surface p-2.5 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <button type="button" onClick={() => props.onSelect(item.place.id)} className="min-w-0 text-left hover:underline">
+                      <span className="block truncate font-semibold text-fg">{item.place.name}</span>
+                      <span className="block truncate text-muted">{item.reasons.join(" · ")}</span>
+                    </button>
+                    <span className="shrink-0 font-mono font-semibold text-brand">{item.place.score}</span>
+                  </div>
+                  {!props.demo && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <button type="button" disabled={props.approaching} onClick={() => props.onApproachPlace(item.place.id)} className="rounded-md bg-brand px-2 py-1 text-[11px] font-medium text-brand-on hover:bg-brand-hover disabled:opacity-50">
+                        Preparar msg
+                      </button>
+                      <button type="button" onClick={() => void props.onProspect(item.place.id, "contatado")} className="rounded-md border border-line px-2 py-1 text-[11px] text-fg hover:bg-background">
+                        Já contatei
+                      </button>
+                      <button type="button" onClick={() => void props.onProspect(item.place.id, "adiar")} className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:text-fg">
+                        Adiar 7d
+                      </button>
+                      <button type="button" onClick={() => void props.onProspect(item.place.id, "ignorar")} className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:text-danger">
+                        Ignorar
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <ul className="space-y-1 px-3 pb-3">
         {places.map((p) => {
           const dist = distanceM(props.center, { lat: p.lat, lng: p.lng });
           const sel = props.selectedId === p.id;
+          const cap = contactCapabilities(p);
+          const status = deriveApproachStatus(p);
           return (
             <li key={p.id}>
               <button type="button" onClick={() => props.onSelect(p.id)} className={`flex w-full gap-3 rounded-2xl p-3 text-left transition ${sel ? "bg-brand-soft" : "hover:bg-background"}`}>
@@ -729,13 +923,23 @@ function ResultsView(props: {
                     {cat?.label} · {p.neighborhood ?? p.city ?? "—"} · {km(dist)}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1.5">
+                    {status !== "nao_abordado" && (
+                      <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand">
+                        {APPROACH_STATUS_LABEL[status]}
+                      </span>
+                    )}
                     {badgesFor(p).slice(0, 3).map((b) => (
                       <span key={b.label} className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">
                         {b.label}
                       </span>
                     ))}
-                    {p.leadStage && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand">No CRM</span>}
-                    {p.approachable === false && <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted/80">Sem contato</span>}
+                    {cap.hasConfirmedWhatsapp ? (
+                      <span className="rounded-full border border-brand/30 px-2 py-0.5 text-[11px] text-brand">WhatsApp confirmado</span>
+                    ) : cap.hasMobile ? (
+                      <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">Celular</span>
+                    ) : !cap.hasUsableContact ? (
+                      <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted/80">Sem contato</span>
+                    ) : null}
                   </span>
                 </span>
                 <span className={`relative mt-1 flex h-[78px] w-[86px] shrink-0 items-center justify-center rounded-xl ${sel ? "bg-surface" : "bg-brand-soft"}`}>
@@ -750,6 +954,14 @@ function ResultsView(props: {
         })}
         {places.length === 0 && <li className="p-6 text-center text-sm text-muted">Nenhum negócio neste filtro.</li>}
       </ul>
+      {props.hasMore && (
+        <div className="px-6 pb-4">
+          <button type="button" disabled={props.loadingMore} onClick={props.onLoadMore} className="btn btn-ghost w-full justify-center">
+            {props.loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {props.loadingMore ? "Carregando mais resultados…" : "Carregar mais resultados"}
+          </button>
+        </div>
+      )}
       <p className="border-t border-line px-6 py-3 text-[11px] text-muted">Lugares: Overture Maps (dados abertos) · Mapa: © colaboradores do OpenStreetMap</p>
     </div>
   );

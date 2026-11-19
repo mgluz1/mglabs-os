@@ -4,7 +4,7 @@ import { CornerDownLeft, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { NAV, QUICK_CREATE } from "@/components/shell/nav";
+import { COMMAND_LINKS, NAV, QUICK_CREATE } from "@/components/shell/nav";
 
 type Hit = { kind: string; id: string; title: string; subtitle: string | null; href: string };
 type Entry = { key: string; label: string; hint?: string; href: string; group: string };
@@ -51,9 +51,10 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const entries: Entry[] = useMemo(() => {
     const term = q.trim().toLowerCase();
     const shownHits = term.length < 2 ? [] : hits;
-    const nav = NAV.flatMap((g) => g.items.map((i) => ({ key: i.href, label: i.label, hint: `g ${i.shortcut}`, href: i.href, group: "Ir para" })));
-    const create = QUICK_CREATE.map((c) => ({ key: c.href, label: c.label, href: c.href, group: "Criar" }));
-    const base = [...nav, ...create].filter((e) => !term || e.label.toLowerCase().includes(term));
+    const nav: Entry[] = NAV.flatMap((g) => g.items.map((i) => ({ key: i.href, label: i.label, hint: `g ${i.shortcut}`, href: i.href, group: "Ir para" })));
+    const extra: Entry[] = COMMAND_LINKS.map((c) => ({ key: c.href, label: c.label, hint: c.shortcut ? `${c.hint} · g ${c.shortcut}` : c.hint, href: c.href, group: "Atalhos" }));
+    const create: Entry[] = QUICK_CREATE.map((c) => ({ key: c.href, label: c.label, href: c.href, group: "Criar" }));
+    const base = [...nav, ...extra, ...create].filter((e) => !term || e.label.toLowerCase().includes(term) || (e.hint?.toLowerCase().includes(term) ?? false));
     const found = shownHits.map((h) => ({ key: `${h.kind}:${h.id}`, label: h.title, hint: `${h.kind}${h.subtitle ? " · " + h.subtitle : ""}`, href: h.href, group: "Resultados" }));
     return [...found, ...base].slice(0, 30);
   }, [q, hits]);

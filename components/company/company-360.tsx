@@ -43,7 +43,7 @@ export function Company360({ data, blocked, blockedReason, canFinance }: { data:
       </div>
 
       <div className="space-y-4">
-        <SectionCard title="Dados" action={<button className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setEdit(true)} aria-label="Editar empresa"><Pencil className="h-4 w-4" /></button>}>
+        <SectionCard title="Dados" action={<button type="button" className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setEdit(true)} aria-label="Editar empresa"><Pencil className="h-4 w-4" /></button>}>
           <dl className="space-y-2 text-sm">
             {[["Categoria", c.category], ["Cidade", [c.neighborhood, c.city].filter(Boolean).join(" · ")], ["Endereço", c.address], ["Origem", sourceLabel(c.source)]].map(([l, v]) => v ? <div key={l as string} className="flex justify-between gap-3"><dt className="text-muted">{l}</dt><dd className="text-right">{v}</dd></div> : null)}
             {c.website && <div className="flex justify-between gap-3"><dt className="text-muted">Site</dt><dd className="truncate text-right"><a href={c.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand hover:underline">{c.website.replace(/^https?:\/\/(www\.)?/, "")}<ExternalLink className="h-3 w-3" /></a></dd></div>}
@@ -63,12 +63,12 @@ export function Company360({ data, blocked, blockedReason, canFinance }: { data:
           )}
           {phone?.mobile && !blocked && <p className="mt-2 text-[11px] text-muted">Celular: provável WhatsApp, ainda não confirmado.</p>}
           <div className="mt-3 flex gap-3 border-t border-line pt-3 text-xs">
-            {!blocked && <button className="text-danger hover:underline" onClick={() => setOptOpen(true)}>Não contatar mais</button>}
-            <button className="inline-flex items-center gap-1 text-muted hover:text-fg" onClick={() => run(() => archiveCompanyAction(c.id, true), { ok: "Empresa arquivada.", onOk: () => router.push("/empresas") })}><Archive className="h-3 w-3" /> Arquivar</button>
+            {!blocked && <button type="button" className="text-danger hover:underline" onClick={() => setOptOpen(true)}>Não contatar mais</button>}
+            <button type="button" className="inline-flex items-center gap-1 text-muted hover:text-fg" onClick={() => run(() => archiveCompanyAction(c.id, true), { ok: "Empresa arquivada.", onOk: () => router.push("/crm?aba=empresas") })}><Archive className="h-3 w-3" aria-hidden /> Arquivar</button>
           </div>
         </SectionCard>
 
-        <SectionCard title={`Contatos (${data.contacts.length})`} action={<button className="btn btn-ghost btn-sm" onClick={() => setContactOpen("novo")}><UserPlus className="h-4 w-4" /> Novo</button>}>
+        <SectionCard title={`Contatos (${data.contacts.length})`} action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => setContactOpen("novo")}><UserPlus className="h-4 w-4" aria-hidden /> Novo</button>}>
           {data.contacts.length === 0 ? <p className="text-sm text-muted">Nenhum contato cadastrado.</p> : (
             <ul className="space-y-2">
               {data.contacts.map((k) => (
@@ -76,8 +76,8 @@ export function Company360({ data, blocked, blockedReason, canFinance }: { data:
                   <div className="flex items-start justify-between gap-2">
                     <span className="min-w-0"><span className="block truncate font-medium">{k.name}</span><span className="block truncate text-xs text-muted">{[k.role, k.preferredChannel && `prefere ${k.preferredChannel}`].filter(Boolean).join(" · ")}</span></span>
                     <span className="flex shrink-0 items-center">
-                      <button className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setContactOpen(k.id)} aria-label={`Editar ${k.name}`}><Pencil className="h-3.5 w-3.5" /></button>
-                      <ConfirmButton className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger" label="Excluir?" onConfirm={() => run(() => deleteContactAction(k.id), { ok: "Contato excluído." })}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton>
+                      <button type="button" className="rounded p-1 text-muted hover:bg-fg/8 hover:text-fg" onClick={() => setContactOpen(k.id)} aria-label={`Editar ${k.name}`}><Pencil className="h-3.5 w-3.5" /></button>
+                      <ConfirmButton className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger" label="Excluir?" ariaLabel={`Excluir ${k.name}`} onConfirm={() => run(() => deleteContactAction(k.id), { ok: "Contato excluído." })}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton>
                     </span>
                   </div>
                   {k.optedOut ? <Badge tone="danger">não contatar</Badge> : <div className="mt-1 text-xs text-muted">{[k.whatsapp ?? k.phone, k.email].filter(Boolean).join(" · ")}</div>}
@@ -87,7 +87,7 @@ export function Company360({ data, blocked, blockedReason, canFinance }: { data:
           )}
         </SectionCard>
 
-        <SectionCard title="Oportunidades" action={<button className="btn btn-ghost btn-sm" onClick={() => setDealOpen(true)}><Plus className="h-4 w-4" /> Nova</button>}>
+        <SectionCard title="Oportunidades" action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => setDealOpen(true)}><Plus className="h-4 w-4" aria-hidden /> Nova</button>}>
           {data.deals.length === 0 ? <p className="text-sm text-muted">Sem oportunidades.</p> : (
             <ul className="space-y-1.5">{data.deals.map((d) => <li key={d.id}><Link href={`/crm?deal=${d.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-elevated px-3 py-2 text-sm hover:border-fg/25"><span className="min-w-0"><span className="block truncate">{d.title}</span><span className="text-xs text-muted">{brl(d.valueCents)}</span></span><Badge tone={d.stageKind === "won" ? "ok" : d.stageKind === "lost" ? "danger" : "brand"}>{d.stageLabel}</Badge></Link></li>)}</ul>
           )}

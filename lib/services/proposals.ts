@@ -8,7 +8,7 @@ import { PROPOSAL_STATUS } from "@/lib/config/crm";
 import { db } from "@/lib/db";
 import { proposalTotals } from "@/lib/money";
 import { logActivity } from "@/lib/services/activities";
-import { assertWrite, audit, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
+import { assertModule, assertWrite, audit, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { advanceDeal } from "@/lib/services/deals";
 import { cents, dateOnly, optStr, parse, reqStr } from "@/lib/services/util";
 
@@ -26,6 +26,7 @@ export const serviceInput = z.object({
 export type ServiceInput = z.input<typeof serviceInput>;
 
 export async function listServices(ctx: Ctx, opts: { includeInactive?: boolean } = {}) {
+  assertModule(ctx, "comercial");
   return db
     .select()
     .from(crmServices)
@@ -35,6 +36,7 @@ export async function listServices(ctx: Ctx, opts: { includeInactive?: boolean }
 
 export async function saveService(ctx: Ctx, id: string | null, raw: ServiceInput) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(serviceInput, raw);
   if (!id) {
     const [row] = await db.insert(crmServices).values({ ...i, workspaceId: ctx.workspaceId }).returning();
@@ -86,6 +88,7 @@ async function event(ctx: Ctx, proposalId: string, kind: string, note?: string) 
 }
 
 export async function listProposals(ctx: Ctx, f: { status?: string; dealId?: string; companyId?: string } = {}) {
+  assertModule(ctx, "comercial");
   const rows = await db.query.crmProposals.findMany({
     where: (t, { and: a, eq: e }) => a(e(t.workspaceId, ctx.workspaceId), f.status ? e(t.status, f.status) : undefined, f.dealId ? e(t.dealId, f.dealId) : undefined, f.companyId ? e(t.companyId, f.companyId) : undefined),
     orderBy: (t, { desc: d }) => d(t.updatedAt),
@@ -95,6 +98,7 @@ export async function listProposals(ctx: Ctx, f: { status?: string; dealId?: str
 }
 
 export async function getProposal(ctx: Ctx, id: string) {
+  assertModule(ctx, "comercial");
   const proposal = await own(ctx, id);
   const [items, events] = await Promise.all([
     db.select().from(crmProposalItems).where(eq(crmProposalItems.proposalId, id)).orderBy(asc(crmProposalItems.position)),
@@ -105,6 +109,7 @@ export async function getProposal(ctx: Ctx, id: string) {
 
 export async function createProposal(ctx: Ctx, raw: ProposalInput) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(proposalInput, raw);
   const { items, ...head } = i;
   const totals = proposalTotals(items, head.discountCents);
@@ -119,6 +124,7 @@ export async function createProposal(ctx: Ctx, raw: ProposalInput) {
 /** Só rascunhos são editáveis. Depois de enviada, a proposta vira registro: crie uma nova versão. */
 export async function updateProposal(ctx: Ctx, id: string, raw: ProposalInput) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const cur = await own(ctx, id);
   if (cur.status !== "rascunho") throw new ValidationError("Proposta já enviada não pode ser editada. Crie uma nova versão.");
   const i = parse(proposalInput, raw);
@@ -144,6 +150,7 @@ const TRANSITIONS: Record<string, string[]> = {
 
 export async function setProposalStatus(ctx: Ctx, id: string, status: string, note?: string) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   if (!PROPOSAL_STATUS.some((s) => s.id === status)) throw new ValidationError("Status inválido.");
   const cur = await own(ctx, id);
   if (!TRANSITIONS[cur.status]?.includes(status)) throw new ValidationError(`Não é possível ir de "${cur.status}" para "${status}".`);
@@ -172,6 +179,7 @@ export async function setProposalStatus(ctx: Ctx, id: string, status: string, no
 /** Nova versão (cópia editável); a anterior permanece intacta. */
 export async function newProposalVersion(ctx: Ctx, id: string) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const { proposal, items } = await getProposal(ctx, id);
   const [row] = await db
     .insert(crmProposals)
@@ -189,6 +197,7 @@ export async function newProposalVersion(ctx: Ctx, id: string) {
 
 export async function deleteProposalDraft(ctx: Ctx, id: string) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const cur = await own(ctx, id);
   if (cur.status !== "rascunho") throw new ValidationError("Só rascunhos podem ser excluídos.");
   await db.delete(crmProposals).where(eq(crmProposals.id, id));

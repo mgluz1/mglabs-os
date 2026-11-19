@@ -38,6 +38,22 @@ export const LOST_REASONS = ["Sem orçamento", "Escolheu outro fornecedor", "Sem
 
 export const SERVICE_TYPES = ["Landing page", "Site institucional", "Site + agendamento", "Automação de WhatsApp", "Projeto sob medida", "Manutenção / suporte"] as const;
 
+export const OFFER_TO_SERVICE = {
+  site: "Site institucional",
+  agendamento: "Site + agendamento",
+  landing: "Landing page",
+  automacao_whatsapp: "Automação de WhatsApp",
+} as const;
+export type OfferId = keyof typeof OFFER_TO_SERVICE;
+
+export function resolveOfferService(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed in OFFER_TO_SERVICE) return OFFER_TO_SERVICE[trimmed as OfferId];
+  if ((SERVICE_TYPES as readonly string[]).includes(trimmed)) return trimmed;
+  return null;
+}
+
 export const PRIORITIES = [
   { id: "baixa", label: "Baixa" },
   { id: "media", label: "Média" },

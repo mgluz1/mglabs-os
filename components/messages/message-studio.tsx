@@ -9,7 +9,7 @@ import { generateMessagesAction } from "@/lib/actions/ai";
 import { messageContextAction, registerSentAction, saveDraftAction, saveTemplateAction, deleteTemplateAction, whatsappLinkAction } from "@/lib/actions/messages";
 import { MESSAGE_OBJECTIVES, MESSAGE_TONES, labelOf } from "@/lib/config/crm";
 import { fmtDateTime } from "@/lib/dates";
-import { COLD_OBJECTIVES, OPT_OUT_LINE, buildTemplateText, TEMPLATE_VARIABLES } from "@/lib/messages";
+import { COLD_OBJECTIVES, OPT_OUT_LINE, buildTemplateText, pickTemplateForOffer, TEMPLATE_VARIABLES } from "@/lib/messages";
 import type { MessageContext } from "@/lib/services/messages";
 
 export type Opt = { value: string; label: string };
@@ -18,7 +18,7 @@ type Draft = { id: string; objective: string; body: string; status: string; orig
 type Variant = { text: string; warnings: string[] };
 type Channel = "whatsapp" | "email" | "instagram";
 
-export function MessageStudio({ options, templates, drafts, services, sender, ai, initial, initialContext }: { options: Opt[]; templates: Template[]; drafts: Draft[]; services: string[]; sender: string; ai: { enabled: boolean; model: string; dailyLimit: number; usedToday: number }; initial: string; initialContext: MessageContext | null }) {
+export function MessageStudio({ options, templates, drafts, services, sender, ai, initial, initialContext, initialService = "" }: { options: Opt[]; templates: Template[]; drafts: Draft[]; services: string[]; sender: string; ai: { enabled: boolean; model: string; dailyLimit: number; usedToday: number }; initial: string; initialContext: MessageContext | null; initialService?: string }) {
   const { run, pending } = useRun();
   const toast = useToast();
   const [tab, setTab] = useState<"escrever" | "modelos">("escrever");
@@ -26,7 +26,7 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
   const [mc, setMc] = useState<MessageContext | null>(initialContext);
   const [loadingCtx, setLoadingCtx] = useState(false);
   const [objective, setObjective] = useState("primeiro_contato");
-  const [service, setService] = useState(initialContext?.serviceType ?? "");
+  const [service, setService] = useState(initialContext?.serviceType ?? initialService);
   const [tone, setTone] = useState("natural");
   const [channel, setChannel] = useState<Channel>("whatsapp");
   const [recipientId, setRecipientId] = useState(initialContext?.recipients[0]?.id ?? "");
@@ -40,6 +40,8 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
   const [aiBusy, setAiBusy] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
   const [awaiting, setAwaiting] = useState<Channel | null>(null);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [saveTpl, setSaveTpl] = useState(false);
   const [tplName, setTplName] = useState("");
 
@@ -52,17 +54,29 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
     setMc(r.data);
     setFacts(r.data.facts);
     setRecipientId(r.data.recipients[0]?.id ?? "");
-    if (r.data.serviceType) setService(r.data.serviceType);
+    setService(r.data.serviceType ?? "");
   }, [toast]);
 
   const pick = (value: string) => {
     setSel(value);
     setVariants([]);
+    setActiveDraftId(null);
+    setAwaiting(null);
+    setConfirmKey(null);
     void loadCtx(value);
   };
 
   const recipient = mc?.recipients.find((r) => r.id === recipientId) ?? null;
-  const templatesForObjective = useMemo(() => templates.filter((t) => t.objective === objective), [templates, objective]);
+  const templatesForObjective = useMemo(() => {
+    const list = templates.filter((t) => t.objective === objective);
+    return [...list].sort((a, b) => {
+      const aMatch = service && a.service === service ? 1 : 0;
+      const bMatch = service && b.service === service ? 1 : 0;
+      return bMatch - aMatch;
+    });
+  }, [templates, objective, service]);
+  const recommendedTemplate = useMemo(() => pickTemplateForOffer(templates, objective, service), [templates, objective, service]);
+  const serviceOptions = useMemo(() => (service && !services.includes(service) ? [service, ...services] : services), [services, service]);
   const cold = (COLD_OBJECTIVES as string[]).includes(objective);
   const blocked = !!mc?.blocked;
 
@@ -93,12 +107,17 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
     objective: objective as "primeiro_contato", service: service || null, tone: tone as "natural", channel, body: text, origin, templateId: templateId || null, facts: facts.length ? facts : null,
   });
 
+  const startAwaiting = (ch: Channel) => {
+    setAwaiting(ch);
+    setConfirmKey((prev) => prev ?? crypto.randomUUID());
+  };
+
   const openWhatsapp = async () => {
     if (!mc || !recipient?.waDigits) return;
     const r = await whatsappLinkAction({ companyId: mc.companyId, contactId: recipient.contactId, phone: recipient.value, text });
     if (!r.ok) { toast(r.error, "error"); return; }
     window.open(r.data, "_blank", "noopener,noreferrer");
-    setAwaiting("whatsapp");
+    startAwaiting("whatsapp");
   };
 
   const copy = async () => {
@@ -149,11 +168,16 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
             <SectionCard title="2 · Objetivo e estilo">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Objetivo" className="sm:col-span-2"><select className="input" value={objective} onChange={(e) => { setObjective(e.target.value); setTemplateId(""); }}>{MESSAGE_OBJECTIVES.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select></Field>
-                <Field label="Serviço ofertado"><select className="input" value={service} onChange={(e) => setService(e.target.value)}><option value="">—</option>{services.map((s) => <option key={s}>{s}</option>)}</select></Field>
+                <Field label="Serviço ofertado"><select className="input" value={service} onChange={(e) => setService(e.target.value)}><option value="">—</option>{serviceOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
                 <Field label="Tom"><select className="input" value={tone} onChange={(e) => setTone(e.target.value)}>{MESSAGE_TONES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></Field>
                 <Field label="Canal"><select className="input" value={channel} onChange={(e) => setChannel(e.target.value as Channel)}><option value="whatsapp">WhatsApp</option><option value="email">E-mail</option><option value="instagram">Instagram (rascunho)</option></select></Field>
-                <Field label="Modelo salvo"><select className="input" value={templateId} onChange={(e) => e.target.value && fromTemplate(e.target.value)} disabled={!mc || blocked}><option value="">{templatesForObjective.length ? "Escolher modelo…" : "Sem modelo para este objetivo"}</option>{templatesForObjective.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.version})</option>)}</select></Field>
+                <Field label="Modelo salvo"><select className="input" value={templateId} onChange={(e) => e.target.value && fromTemplate(e.target.value)} disabled={!mc || blocked}><option value="">{templatesForObjective.length ? "Escolher modelo…" : "Sem modelo para este objetivo"}</option>{templatesForObjective.map((t) => <option key={t.id} value={t.id}>{t.name}{service && t.service === service ? " · da oferta" : ""} (v{t.version})</option>)}</select></Field>
               </div>
+              {recommendedTemplate && mc && !blocked && (
+                <button type="button" onClick={() => fromTemplate(recommendedTemplate.id)} className="mt-2 text-xs font-medium text-brand hover:underline">
+                  Preencher com modelo recomendado ({recommendedTemplate.name})
+                </button>
+              )}
               {cold && <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={optOut} onChange={(e) => setOptOut(e.target.checked)} /><span>Incluir aviso de saída: “{OPT_OUT_LINE}”</span></label>}
             </SectionCard>
           </div>
@@ -166,18 +190,18 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
               {awaiting ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand/30 bg-brand/10 p-3 text-sm">
                   <span className="flex-1">Você enviou a mensagem?</span>
-                  <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => run(() => registerSentAction({ draft: draftInput(), channel: awaiting }), { ok: "Envio registrado no histórico. Follow-up agendado para daqui a 3 dias.", onOk: () => { setAwaiting(null); setText(""); setVariants([]); } })}>Sim, registrar</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setAwaiting(null)}>Não</button>
+                  <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => run(() => registerSentAction({ draft: draftInput(), draftId: activeDraftId, idempotencyKey: confirmKey, channel: awaiting }), { ok: "Envio registrado no histórico. Follow-up agendado para daqui a 3 dias.", onOk: () => { setAwaiting(null); setConfirmKey(null); setActiveDraftId(null); setText(""); setVariants([]); } })}>Sim, registrar</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setAwaiting(null); setConfirmKey(null); }}>Não</button>
                 </div>
               ) : (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button className="btn btn-primary" disabled={!text.trim() || blocked || !recipient?.waDigits || channel !== "whatsapp"} onClick={openWhatsapp} title={channel !== "whatsapp" ? "Escolha o canal WhatsApp" : !recipient?.waDigits ? "Sem celular para WhatsApp" : undefined}><MessageCircle className="h-4 w-4" /> Abrir no WhatsApp</button>
-                  {channel === "email" && recipient?.kind === "email" && !blocked && <a className={`btn btn-ghost ${!text.trim() ? "pointer-events-none opacity-50" : ""}`} href={`mailto:${recipient.value}?subject=${encodeURIComponent(`Ideia para ${mc?.companyName ?? ""}`)}&body=${encodeURIComponent(text)}`} onClick={() => setAwaiting("email")}><Mail className="h-4 w-4" /> Abrir e-mail</a>}
-                  {channel === "instagram" && recipient?.kind === "instagram" && !blocked && <a className="btn btn-ghost" href={recipient.value} target="_blank" rel="noreferrer" onClick={() => { void copy(); setAwaiting("instagram"); }}><ExternalLink className="h-4 w-4" /> Copiar e abrir perfil</a>}
+                  {channel === "email" && recipient?.kind === "email" && !blocked && <a className={`btn btn-ghost ${!text.trim() ? "pointer-events-none opacity-50" : ""}`} href={`mailto:${recipient.value}?subject=${encodeURIComponent(`Ideia para ${mc?.companyName ?? ""}`)}&body=${encodeURIComponent(text)}`} onClick={() => startAwaiting("email")}><Mail className="h-4 w-4" /> Abrir e-mail</a>}
+                  {channel === "instagram" && recipient?.kind === "instagram" && !blocked && <a className="btn btn-ghost" href={recipient.value} target="_blank" rel="noreferrer" onClick={() => { void copy(); startAwaiting("instagram"); }}><ExternalLink className="h-4 w-4" /> Copiar e abrir perfil</a>}
                   <button className="btn btn-ghost" disabled={!text.trim()} onClick={copy}><Copy className="h-4 w-4" /> Copiar</button>
-                  <button className="btn btn-ghost" disabled={!text.trim() || !mc || blocked || pending} onClick={() => run(() => saveDraftAction(draftInput()), { ok: "Rascunho salvo." })}><Save className="h-4 w-4" /> Salvar rascunho</button>
+                  <button className="btn btn-ghost" disabled={!text.trim() || !mc || blocked || pending} onClick={() => run(() => saveDraftAction(draftInput(), activeDraftId), { ok: "Rascunho salvo.", onOk: (saved) => setActiveDraftId(saved.id) })}><Save className="h-4 w-4" /> Salvar rascunho</button>
                   <button className="btn btn-ghost" disabled={!text.trim() || pending} onClick={() => { setTplName(""); setSaveTpl(true); }}><Bookmark className="h-4 w-4" /> Salvar como modelo</button>
-                  <button className="btn btn-ghost" disabled={!text.trim() || !mc || blocked || pending} onClick={() => setAwaiting(channel)} title="Use se enviou por fora do app (ligação, e-mail, outro WhatsApp)">Já enviei por fora</button>
+                  <button className="btn btn-ghost" disabled={!text.trim() || !mc || blocked || pending} onClick={() => startAwaiting(channel)} title="Use se enviou por fora do app (ligação, e-mail, outro WhatsApp)">Já enviei por fora</button>
                 </div>
               )}
               <p className="mt-2 text-[11px] text-muted">O MGLABS OS nunca envia nada sozinho: você abre o WhatsApp com o texto pronto e envia pelo seu aparelho. O histórico só é gravado depois da sua confirmação.</p>
@@ -212,7 +236,7 @@ export function MessageStudio({ options, templates, drafts, services, sender, ai
                     <li key={d.id} className="flex items-start gap-3 py-2 first:pt-0 last:pb-0">
                       <div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm">{d.body}</p><p className="mt-0.5 text-xs text-muted">{labelOf(MESSAGE_OBJECTIVES, d.objective)} · {fmtDateTime(d.createdAt)}</p></div>
                       <Badge tone={d.status === "enviada" ? "ok" : "neutral"}>{d.status === "enviada" ? "enviada" : "rascunho"}</Badge>
-                      <button className="btn btn-ghost btn-sm" onClick={() => { setText(d.body); setOrigin("manual"); setTab("escrever"); }}>Abrir</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => { setText(d.body); setActiveDraftId(d.status === "rascunho" ? d.id : null); setOrigin("manual"); setTab("escrever"); }}>Abrir</button>
                     </li>
                   ))}
                 </ul>

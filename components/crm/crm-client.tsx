@@ -86,8 +86,8 @@ export function CrmClient({ deals, stages, companies, services, aiEnabled = fals
         description={`${totals.open} em aberto · previsto ${brl(totals.openCents, { compact: true })} · ponderado ${brl(totals.weighted, { compact: true })} · ${totals.won} fechado(s)`}
         actions={
           <>
-            <a href="/api/crm/export" className="btn btn-ghost btn-sm"><Download className="h-4 w-4" /> CSV</a>
-            <button className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> Nova oportunidade</button>
+            <a href="/api/crm/export" className="btn btn-ghost btn-sm"><Download className="h-4 w-4" aria-hidden /> CSV</a>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" aria-hidden /> Nova oportunidade</button>
           </>
         }
       />
@@ -99,16 +99,16 @@ export function CrmClient({ deals, stages, companies, services, aiEnabled = fals
         <select className="input w-auto" value={source} onChange={(e) => setSource(e.target.value)} aria-label="Origem"><option value="">Todas as origens</option>{SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>
         <select className="input w-auto" value={service} onChange={(e) => setService(e.target.value)} aria-label="Serviço"><option value="">Todos os serviços</option>{services.map((s) => <option key={s}>{s}</option>)}</select>
         <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm"><input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} /> Atrasados</label>
-        {filtersActive && <button className="text-xs text-muted hover:text-fg" onClick={() => { setQ(""); setSource(""); setService(""); setOverdue(false); }}>Limpar filtros</button>}
+        {filtersActive && <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => { setQ(""); setSource(""); setService(""); setOverdue(false); }}>Limpar filtros</button>}
         <div className="ml-auto flex rounded-lg border border-line p-0.5" role="group" aria-label="Visualização">
-          <button className={`rounded-md p-1.5 ${view === "kanban" ? "bg-brand/15 text-brand" : "text-muted"}`} onClick={() => setView("kanban")} aria-label="Quadro" aria-pressed={view === "kanban"}><Kanban className="h-4 w-4" /></button>
-          <button className={`rounded-md p-1.5 ${view === "tabela" ? "bg-brand/15 text-brand" : "text-muted"}`} onClick={() => setView("tabela")} aria-label="Tabela" aria-pressed={view === "tabela"}><LayoutList className="h-4 w-4" /></button>
+          <button type="button" className={`rounded-md p-1.5 ${view === "kanban" ? "bg-brand/15 text-brand" : "text-muted"}`} onClick={() => setView("kanban")} aria-label="Quadro" aria-pressed={view === "kanban"}><Kanban className="h-4 w-4" /></button>
+          <button type="button" className={`rounded-md p-1.5 ${view === "tabela" ? "bg-brand/15 text-brand" : "text-muted"}`} onClick={() => setView("tabela")} aria-label="Tabela" aria-pressed={view === "tabela"}><LayoutList className="h-4 w-4" /></button>
         </div>
       </div>
 
       {deals.length === 0 ? (
         <div className="px-4 sm:px-8">
-          <EmptyState icon={Kanban} title="Seu funil está vazio" description="Crie uma oportunidade manualmente ou envie empresas do Radar para o CRM. Elas aparecem aqui na etapa “Novo”." action={<><button className="btn btn-primary" onClick={() => setNewOpen(true)}>Nova oportunidade</button><a href="/radar" className="btn btn-ghost">Buscar no Radar</a></>} />
+          <EmptyState icon={Kanban} title="Seu funil está vazio" description="Crie uma oportunidade manualmente ou envie empresas do Radar para o CRM. Elas aparecem aqui na etapa “Novo”." action={<><button type="button" className="btn btn-primary" onClick={() => setNewOpen(true)}>Nova oportunidade</button><a href="/radar" className="btn btn-ghost">Buscar no Radar</a></>} />
         </div>
       ) : view === "kanban" ? (
         <DndContext id="crm-board" sensors={sensors} onDragEnd={onDragEnd}>
@@ -124,7 +124,7 @@ export function CrmClient({ deals, stages, companies, services, aiEnabled = fals
             <thead className="sticky top-0 bg-background text-left text-xs text-muted"><tr>{["Oportunidade", "Etapa", "Valor", "Próximo passo", "Origem", "Score"].map((h) => <th key={h} className="border-b border-line px-3 py-2 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {filtered.map((d) => (
-                <tr key={d.id} tabIndex={0} onClick={() => setDeal(d.id)} onKeyDown={(e) => e.key === "Enter" && setDeal(d.id)} className="cursor-pointer border-b border-line/60 hover:bg-fg/5">
+                <tr key={d.id} tabIndex={0} onClick={() => setDeal(d.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDeal(d.id); } }} className="cursor-pointer border-b border-line/60 hover:bg-fg/5">
                   <td className="px-3 py-2.5"><div className="font-medium">{d.title}</div><div className="text-xs text-muted">{d.companyName}</div></td>
                   <td className="px-3 py-2.5"><StageBadge kind={d.stageKind} label={stages.find((s) => s.key === d.stageKey)?.label ?? d.stageKey} /></td>
                   <td className="px-3 py-2.5 tabular-nums">{brl(d.valueCents)}</td>
@@ -145,7 +145,7 @@ export function CrmClient({ deals, stages, companies, services, aiEnabled = fals
         open={!!lostFor}
         onClose={() => setLostFor(null)}
         title="Motivo da perda"
-        footer={<><button className="btn btn-ghost" onClick={() => setLostFor(null)}>Cancelar</button><button className="btn btn-primary" onClick={() => { const id = lostFor!; setLostFor(null); run(() => moveDealAction(id, "perdido", lostReason === "Outro" ? lostOther.trim() || "Outro" : lostReason), { ok: "Marcado como perdido." }); }}>Marcar como perdido</button></>}
+        footer={<><button type="button" className="btn btn-ghost" onClick={() => setLostFor(null)}>Cancelar</button><button type="button" className="btn btn-primary" onClick={() => { const id = lostFor!; setLostFor(null); run(() => moveDealAction(id, "perdido", lostReason === "Outro" ? lostOther.trim() || "Outro" : lostReason), { ok: "Marcado como perdido." }); }}>Marcar como perdido</button></>}
       >
         <select className="input" value={lostReason} onChange={(e) => setLostReason(e.target.value)} aria-label="Motivo">{LOST_REASONS.map((r) => <option key={r}>{r}</option>)}</select>
         {lostReason === "Outro" && <input className="input mt-2" placeholder="Descreva" value={lostOther} onChange={(e) => setLostOther(e.target.value)} />}

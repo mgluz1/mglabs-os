@@ -4,7 +4,7 @@ import pLimit from "p-limit";
 import { sql } from "drizzle-orm";
 
 import { analyzeHtml, classifySite, type HtmlSignals } from "@/lib/audit/analyze-html";
-import { fetchHomepage } from "@/lib/audit/fetch-site";
+import { fetchHomepage, isPublicWebUrl } from "@/lib/audit/fetch-site";
 import { pageSpeed } from "@/lib/audit/pagespeed";
 import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
@@ -47,10 +47,18 @@ async function auditOne(c: Claimed): Promise<void> {
   let fetchError: string | null = null;
 
   if (siteType === "site_proprio" && c.url) {
-    const [page, ps] = await Promise.all([fetchHomepage(c.url), pageSpeed(c.url)]);
-    psi = ps;
-    if (page.ok) signals = analyzeHtml(page.html, page.finalUrl);
-    else fetchError = page.reason;
+    const normalizedUrl = /^https?:\/\//i.test(c.url) ? c.url : `https://${c.url}`;
+    const page = await fetchHomepage(c.url);
+    if (page.ok) {
+      signals = analyzeHtml(page.html, page.finalUrl);
+      psi = await pageSpeed(page.finalUrl);
+    } else {
+      fetchError = page.reason;
+      // Só consulta PageSpeed quando o destino passou na política pública/SSRF
+      if (page.reason !== "endereço não permitido" && isPublicWebUrl(normalizedUrl)) {
+        psi = await pageSpeed(normalizedUrl);
+      }
+    }
   }
 
   // contatos que a própria empresa publicou no site (podem ser guardados)
@@ -75,18 +83,19 @@ async function auditOne(c: Claimed): Promise<void> {
   for (const x of stored) if (!contacts.some((y) => y.kind === x.kind && y.value === x.value)) contacts.push({ ...x, confirmed: false, stored: true });
   const googlePhone = parseBrPhone(c.google_phone);
   const hasMobileOrWhatsapp = Boolean(googlePhone?.mobile) || contacts.some((x) => x.kind === "whatsapp" || (x.kind === "phone" && parseBrPhone(x.value)?.mobile));
+  const auditFailed = siteType === "site_proprio" && !signals && fetchError != null;
   const score = computeScore({
     category: c.category,
     siteType,
-    https: signals?.https ?? (siteType === "site_proprio" && c.url ? c.url.startsWith("https://") : null),
+    https: signals ? signals.https : null,
     viewport: signals?.viewport ?? null,
     psiPerformance: psi.performance,
     hasServicesPage: signals ? signals.hasServicesPage : null,
     seoBasicMissing: signals?.seoBasicMissing ?? null,
     hasWhatsappButton: signals ? signals.hasWhatsappButton : null,
     hasTelLink: signals ? signals.hasTelLink : null,
-    hasBooking: signals?.hasBooking ?? false,
-    hasMenu: signals?.hasMenu ?? false,
+    hasBooking: signals ? signals.hasBooking : null,
+    hasMenu: signals ? signals.hasMenu : null,
     rating: c.rating == null ? null : Number(c.rating),
     ratingCount: c.rating_count,
     confidence: c.confidence == null ? null : Number(c.confidence),
@@ -109,7 +118,7 @@ async function auditOne(c: Claimed): Promise<void> {
         has_services_page = ${signals?.hasServicesPage ?? null}, has_booking = ${signals?.hasBooking ?? null},
         has_whatsapp_button = ${signals?.hasWhatsappButton ?? null},
         signals = ${JSON.stringify(signalsJson)}::jsonb, approachable = ${score.approachable},
-        status = 'done', error = ${fetchError}, audited_at = now()
+        status = ${auditFailed ? "error" : "done"}, error = ${fetchError}, audited_at = now()
       where id = ${c.audit_id}`);
     const fresh = contacts.filter((x) => !x.stored);
     if (fresh.length) {
@@ -149,4 +158,21 @@ export async function processAuditBatch(limit = 5): Promise<{ processed: number;
   );
   const { rows } = await db.execute<{ n: number }>(sql`select count(*)::int as n from site_audits where status in ('pending', 'running')`);
   return { processed: claimed.length - failed, failed, pending: rows[0]?.n ?? 0 };
+}
+
+/** Reenfileira auditorias com falha recuperável para nova tentativa. */
+export async function requeueFailedAudits(placeIds: string[]): Promise<number> {
+  const clean = placeIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id)).slice(0, 100);
+  if (!clean.length) return 0;
+  const { rows } = await db.execute<{ n: number }>(sql`
+    with updated as (
+      update site_audits
+      set status = 'pending', error = null
+      where place_id in (select x::uuid from jsonb_array_elements_text(${JSON.stringify(clean)}::jsonb) as x)
+        and status = 'error'
+        and coalesce(error, '') not in ('endereço não permitido', 'robots.txt não permite')
+      returning 1
+    )
+    select count(*)::int as n from updated`);
+  return rows[0]?.n ?? 0;
 }

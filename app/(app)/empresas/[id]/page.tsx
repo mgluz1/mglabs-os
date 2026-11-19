@@ -15,7 +15,7 @@ export default function CompanyPage({ params }: PageProps<"/empresas/[id]">) {
         const c = data.company;
         return (
           <>
-            <PageHeader back={{ href: "/empresas", label: "Empresas e contatos" }} title={c.name} description={<span className="inline-flex items-center gap-2"><Badge tone={c.status === "cliente" ? "ok" : "brand"}>{c.status === "cliente" ? "Cliente" : c.status === "inativo" ? "Inativa" : "Lead"}</Badge>{[c.category, c.city].filter(Boolean).join(" · ")}</span>} />
+            <PageHeader back={{ href: "/crm?aba=empresas", label: "CRM · Empresas" }} title={c.name} description={<span className="inline-flex items-center gap-2"><Badge tone={c.status === "cliente" ? "ok" : "brand"}>{c.status === "cliente" ? "Cliente" : c.status === "inativo" ? "Inativa" : "Lead"}</Badge>{[c.category, c.city].filter(Boolean).join(" · ")}</span>} />
             <Page wide><Company360 data={data} blocked={block.blocked} blockedReason={block.reason} canFinance={canModule(ctx, "financeiro")} /></Page>
           </>
         );

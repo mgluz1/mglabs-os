@@ -6,12 +6,13 @@ export type Badge = { label: string; tone: "red" | "amber" | "sky" | "slate" };
 
 export function badgesFor(p: RadarPlace): Badge[] {
   const b: Badge[] = [];
-  if (p.siteType === "sem_site") b.push({ label: "Sem site", tone: "red" });
-  if (p.siteType === "so_rede_social") b.push({ label: "Só Instagram", tone: "red" });
+  if (p.auditStatus === "error") b.push({ label: "Erro na auditoria", tone: "red" });
+  if (p.siteType === "sem_site") b.push({ label: "Site não identificado", tone: "slate" });
+  if (p.siteType === "so_rede_social") b.push({ label: "Só rede social", tone: "amber" });
   if (p.psiPerformance != null && p.psiPerformance < 50) b.push({ label: "Site lento", tone: "amber" });
   if (p.viewport === false) b.push({ label: "Não responsivo", tone: "amber" });
   const cat = p.category ? getCategory(p.category) : undefined;
-  if (cat?.agenda && p.auditStatus === "done" && !p.hasBooking) b.push({ label: "Sem agendamento", tone: "sky" });
+  if (cat?.agenda && p.auditStatus === "done" && p.hasBooking === false) b.push({ label: "Agendamento não detectado", tone: "sky" });
   if (p.oldSite.length) b.push({ label: "Site antigo", tone: "amber" });
   return b;
 }

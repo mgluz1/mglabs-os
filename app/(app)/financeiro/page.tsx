@@ -1,9 +1,10 @@
-import { Gate } from "@/components/shell/gate";
 import { FinanceClient } from "@/components/finance/finance-client";
+import { SettingsNav } from "@/components/settings/settings-nav";
+import { Gate } from "@/components/shell/gate";
 import { Kpi, Page, PageHeader, PendingNote, SectionCard } from "@/components/ui/kit";
 import { brl } from "@/lib/money";
 import type { ReceivableState } from "@/lib/money";
-import { assertModule } from "@/lib/services/ctx";
+import { assertModule, canModule } from "@/lib/services/ctx";
 import { listCompanies } from "@/lib/services/companies";
 import { financeSummary, listReceivables } from "@/lib/services/finance";
 import { listProjects } from "@/lib/services/projects";
@@ -28,6 +29,7 @@ export default function FinanceiroPage({ searchParams }: PageProps<"/financeiro"
         return (
           <>
             <PageHeader title="Financeiro" description="Contas a receber e pagamentos registrados à mão. Previsto, contratado, a receber e recebido são números separados." />
+            <SettingsNav current="financeiro" canFinance canConfig={canModule(ctx, "config")} />
             <Page>
               <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <Kpi label="Pipeline previsto" value={brl(sum.pipelineCents, { compact: true })} hint={`Ponderado ${brl(sum.pipelineWeightedCents, { compact: true })}`} href="/crm" />

@@ -90,7 +90,7 @@ export function Dialog({ open, onClose, title, children, footer, wide }: { open:
         <div className="flex max-h-[90dvh] flex-col">
           <div className="flex items-center justify-between border-b border-line px-5 py-3">
             <h2 className="font-heading text-base font-semibold">{title}</h2>
-            <button onClick={onClose} className="rounded p-1 text-muted hover:bg-fg/10 hover:text-fg" aria-label="Fechar">
+            <button type="button" onClick={onClose} className="rounded p-1 text-muted hover:bg-fg/10 hover:text-fg" aria-label="Fechar">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -118,7 +118,7 @@ export function SlideOver({ open, onClose, title, subtitle, children }: { open: 
               <h2 className="truncate font-heading text-lg font-semibold">{title}</h2>
               {subtitle && <div className="mt-0.5 text-xs text-muted">{subtitle}</div>}
             </div>
-            <button onClick={onClose} className="rounded p-1 text-muted hover:bg-fg/10 hover:text-fg" aria-label="Fechar painel">
+            <button type="button" onClick={onClose} className="rounded p-1 text-muted hover:bg-fg/10 hover:text-fg" aria-label="Fechar painel">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -130,7 +130,7 @@ export function SlideOver({ open, onClose, title, subtitle, children }: { open: 
 }
 
 /** Botão com confirmação inline para ações destrutivas. */
-export function ConfirmButton({ children, onConfirm, label = "Confirmar?", className = "btn btn-danger btn-sm", disabled }: { children: ReactNode; onConfirm: () => void; label?: string; className?: string; disabled?: boolean }) {
+export function ConfirmButton({ children, onConfirm, label = "Confirmar?", className = "btn btn-danger btn-sm", disabled, ariaLabel }: { children: ReactNode; onConfirm: () => void; label?: string; className?: string; disabled?: boolean; ariaLabel?: string }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -141,6 +141,7 @@ export function ConfirmButton({ children, onConfirm, label = "Confirmar?", class
     <button
       type="button"
       disabled={disabled}
+      aria-label={armed ? label : ariaLabel}
       className={className}
       onClick={() => {
         if (armed) {

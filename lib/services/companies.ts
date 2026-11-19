@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
 import { placeById } from "@/lib/queries";
 import { logActivity, timelineFor } from "@/lib/services/activities";
-import { assertWrite, audit, NotFoundError, type Ctx } from "@/lib/services/ctx";
+import { assertAnyModule, assertModule, assertWrite, audit, canModule, NotFoundError, type Ctx } from "@/lib/services/ctx";
 import { limitOf, normInstagram, normPhone, normUrl, optStr, parse, reqStr, tagsSchema } from "@/lib/services/util";
 import { SOURCES } from "@/lib/config/crm";
 
@@ -51,6 +51,7 @@ export type ContactRow = typeof crmContacts.$inferSelect;
 
 export async function createCompany(ctx: Ctx, raw: CompanyInput): Promise<CompanyRow> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(companyInput, raw);
   const [row] = await db
     .insert(crmCompanies)
@@ -63,6 +64,7 @@ export async function createCompany(ctx: Ctx, raw: CompanyInput): Promise<Compan
 
 export async function updateCompany(ctx: Ctx, id: string, raw: Partial<CompanyInput>): Promise<CompanyRow> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(companyInput.partial(), raw);
   const patch: Partial<typeof crmCompanies.$inferInsert> = { ...i, updatedAt: new Date() };
   if ("phone" in i) patch.phone = normPhone(i.phone);
@@ -77,6 +79,7 @@ export async function updateCompany(ctx: Ctx, id: string, raw: Partial<CompanyIn
 
 export async function archiveCompany(ctx: Ctx, id: string, archived: boolean) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   await db.update(crmCompanies).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() }).where(and(eq(crmCompanies.id, id), eq(crmCompanies.workspaceId, ctx.workspaceId)));
   await audit(ctx, archived ? "archive" : "unarchive", "company", id);
 }
@@ -99,6 +102,7 @@ export type CompanyListItem = {
 };
 
 export async function listCompanies(ctx: Ctx, f: { q?: string; status?: string; limit?: number; offset?: number } = {}): Promise<CompanyListItem[]> {
+  assertAnyModule(ctx, "comercial", "operacao", "financeiro");
   const q = f.q?.trim();
   const { rows } = await db.execute<{ id: string; name: string; status: string; category: string | null; city: string | null; source: string; phone: string | null; email: string | null; tags: string[]; place_id: string | null; open_deals: number; contacts: number; last_activity_at: string | null; created_at: string }>(sql`
     select c.id, c.name, c.status, c.category, c.city, c.source, c.phone, c.email, c.tags, c.place_id, c.created_at,
@@ -115,6 +119,7 @@ export async function listCompanies(ctx: Ctx, f: { q?: string; status?: string; 
 }
 
 export async function getCompany(ctx: Ctx, id: string): Promise<CompanyRow> {
+  assertAnyModule(ctx, "comercial", "operacao", "financeiro");
   const [row] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.id, id), eq(crmCompanies.workspaceId, ctx.workspaceId)));
   if (!row) throw new NotFoundError("Empresa");
   return row;
@@ -122,7 +127,9 @@ export async function getCompany(ctx: Ctx, id: string): Promise<CompanyRow> {
 
 /** Ficha 360°: tudo que se relaciona à empresa, numa só consulta de leitura. */
 export async function getCompany360(ctx: Ctx, id: string) {
+  assertModule(ctx, "comercial");
   const company = await getCompany(ctx, id);
+  const canFin = canModule(ctx, "financeiro");
   const [contacts, deals, tasks, proposals, projects, receivables, timeline] = await Promise.all([
     db.select().from(crmContacts).where(eq(crmContacts.companyId, id)).orderBy(crmContacts.name),
     db.execute<{ id: string; title: string; stage_key: string; stage_label: string; stage_kind: string; value: string | null; next_step: string | null; next_step_at: string | null; created_at: string }>(sql`
@@ -133,10 +140,12 @@ export async function getCompany360(ctx: Ctx, id: string) {
     db.execute<{ id: string; title: string; status: string; version: number; total: string }>(sql`
       select id, title, status, version, total_cents::text as total from crm_proposals where company_id = ${id} order by created_at desc`),
     db.execute<{ id: string; name: string; status: string; phase: string }>(sql`select id, name, status, phase from crm_projects where company_id = ${id} order by created_at desc`),
-    db.execute<{ amount: string; paid: string }>(sql`
-      select coalesce(sum(r.amount_cents),0)::text as amount,
-             coalesce(sum((select coalesce(sum(p.amount_cents),0) from crm_payments p where p.receivable_id = r.id)),0)::text as paid
-      from crm_receivables r where r.company_id = ${id} and r.status <> 'cancelada'`),
+    canFin
+      ? db.execute<{ amount: string; paid: string }>(sql`
+          select coalesce(sum(r.amount_cents),0)::text as amount,
+                 coalesce(sum((select coalesce(sum(p.amount_cents),0) from crm_payments p where p.receivable_id = r.id)),0)::text as paid
+          from crm_receivables r where r.company_id = ${id} and r.status <> 'cancelada'`)
+      : Promise.resolve({ rows: [{ amount: "0", paid: "0" }] }),
     timelineFor(ctx, { companyId: id }, 150),
   ]);
   return {
@@ -155,6 +164,7 @@ export async function getCompany360(ctx: Ctx, id: string) {
 
 export async function createContact(ctx: Ctx, raw: ContactInput): Promise<ContactRow> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(contactInput, raw);
   if (i.companyId) await getCompany(ctx, i.companyId);
   const [row] = await db
@@ -168,6 +178,7 @@ export async function createContact(ctx: Ctx, raw: ContactInput): Promise<Contac
 
 export async function updateContact(ctx: Ctx, id: string, raw: Partial<ContactInput>): Promise<ContactRow> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(contactInput.partial(), raw);
   const patch: Partial<typeof crmContacts.$inferInsert> = { ...i, updatedAt: new Date() };
   if ("phone" in i) patch.phone = normPhone(i.phone);
@@ -181,11 +192,13 @@ export async function updateContact(ctx: Ctx, id: string, raw: Partial<ContactIn
 
 export async function deleteContact(ctx: Ctx, id: string) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   await db.delete(crmContacts).where(and(eq(crmContacts.id, id), eq(crmContacts.workspaceId, ctx.workspaceId)));
   await audit(ctx, "delete", "contact", id);
 }
 
 export async function listContacts(ctx: Ctx, f: { q?: string; companyId?: string; limit?: number } = {}) {
+  assertModule(ctx, "comercial");
   const q = f.q?.trim();
   const { rows } = await db.execute<{ id: string; name: string; role: string | null; email: string | null; phone: string | null; whatsapp: string | null; company_id: string | null; company_name: string | null; opted_out: boolean; last_contact_at: string | null }>(sql`
     select k.id, k.name, k.role, k.email, k.phone, k.whatsapp, k.company_id, c.name as company_name, k.opted_out, k.last_contact_at
@@ -205,6 +218,7 @@ export async function listContacts(ctx: Ctx, f: { q?: string; companyId?: string
  */
 export async function companyFromPlace(ctx: Ctx, placeId: string): Promise<{ company: CompanyRow; created: boolean }> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const [existing] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.workspaceId, ctx.workspaceId), eq(crmCompanies.placeId, placeId)));
   if (existing) return { company: existing, created: false };
   const place = await placeById(placeId);

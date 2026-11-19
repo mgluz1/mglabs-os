@@ -50,26 +50,58 @@ export async function createReceivables(ctx: Ctx, raw: ReceivableInput) {
 
 export const paymentInput = z.object({
   receivableId: z.string().uuid(),
-  amountCents: z.number().int().min(1, "Informe um valor maior que zero"),
+  amountCents: z.number().int().min(1, "Informe um valor maior que zero").max(1_000_000_000_00),
   paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida"),
   method: z.enum(["pix", "boleto", "cartao", "transferencia", "dinheiro", "outro"]).nullish().transform((v) => v ?? null),
   notes: optStr(500),
 });
 export type PaymentInput = z.input<typeof paymentInput>;
 
-/** Registro manual de recebimento. Não permite pagar mais que o saldo (evita receita inflada). */
+/** Registro manual de recebimento. Transação com lock na cobrança evita pagar mais que o saldo em chamadas concorrentes. */
 export async function registerPayment(ctx: Ctx, raw: PaymentInput) {
   assertWrite(ctx);
   assertModule(ctx, "financeiro");
   const i = parse(paymentInput, raw);
-  const [rec] = await db.select().from(crmReceivables).where(and(eq(crmReceivables.id, i.receivableId), eq(crmReceivables.workspaceId, ctx.workspaceId)));
-  if (!rec) throw new NotFoundError("Cobrança");
-  if (rec.status === "cancelada") throw new ValidationError("Esta cobrança foi cancelada.");
-  const [{ paid }] = await db.select({ paid: sql<string>`coalesce(sum(${crmPayments.amountCents}),0)::text` }).from(crmPayments).where(eq(crmPayments.receivableId, rec.id));
-  const balance = rec.amountCents - Number(paid);
-  if (i.amountCents > balance) throw new ValidationError("O valor excede o saldo em aberto desta cobrança.");
-  const [row] = await db.insert(crmPayments).values({ ...i, workspaceId: ctx.workspaceId, createdBy: ctx.userId }).returning();
-  await logActivity(ctx, { companyId: rec.companyId, dealId: rec.dealId, kind: "pagamento", content: `Pagamento registrado: ${rec.description}`, meta: { paymentId: row.id, amountCents: i.amountCents } });
+
+  const { row, rec } = await db.transaction(async (tx) => {
+    const { rows: recs } = await tx.execute<{
+      id: string;
+      company_id: string;
+      deal_id: string | null;
+      description: string;
+      amount_cents: string;
+      status: string;
+    }>(sql`
+      select id, company_id, deal_id, description, amount_cents::text as amount_cents, status
+      from crm_receivables
+      where id = ${i.receivableId} and workspace_id = ${ctx.workspaceId}
+      for update
+    `);
+    const found = recs[0];
+    if (!found) throw new NotFoundError("Cobrança");
+    if (found.status === "cancelada") throw new ValidationError("Esta cobrança foi cancelada.");
+
+    const [{ paid }] = await tx
+      .select({ paid: sql<string>`coalesce(sum(${crmPayments.amountCents}),0)::text` })
+      .from(crmPayments)
+      .where(eq(crmPayments.receivableId, found.id));
+    const balance = Number(found.amount_cents) - Number(paid);
+    if (i.amountCents > balance) throw new ValidationError("O valor excede o saldo em aberto desta cobrança.");
+
+    const [inserted] = await tx
+      .insert(crmPayments)
+      .values({ ...i, workspaceId: ctx.workspaceId, createdBy: ctx.userId })
+      .returning();
+    return { row: inserted, rec: found };
+  });
+
+  await logActivity(ctx, {
+    companyId: rec.company_id,
+    dealId: rec.deal_id,
+    kind: "pagamento",
+    content: `Pagamento registrado: ${rec.description}`,
+    meta: { paymentId: row.id, amountCents: i.amountCents },
+  });
   await audit(ctx, "create", "payment", row.id, { amountCents: i.amountCents });
   return row;
 }
@@ -84,7 +116,16 @@ export async function deletePayment(ctx: Ctx, id: string) {
 export async function cancelReceivable(ctx: Ctx, id: string) {
   assertWrite(ctx);
   assertModule(ctx, "financeiro");
-  await db.update(crmReceivables).set({ status: "cancelada", updatedAt: new Date() }).where(and(eq(crmReceivables.id, id), eq(crmReceivables.workspaceId, ctx.workspaceId)));
+  await db.transaction(async (tx) => {
+    const { rows } = await tx.execute<{ id: string }>(sql`
+      select id from crm_receivables where id = ${id} and workspace_id = ${ctx.workspaceId} for update
+    `);
+    if (!rows[0]) throw new NotFoundError("Cobrança");
+    await tx
+      .update(crmReceivables)
+      .set({ status: "cancelada", updatedAt: new Date() })
+      .where(and(eq(crmReceivables.id, id), eq(crmReceivables.workspaceId, ctx.workspaceId)));
+  });
   await audit(ctx, "cancel", "receivable", id);
 }
 

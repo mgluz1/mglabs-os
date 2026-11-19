@@ -2,6 +2,7 @@ import { MessageStudio } from "@/components/messages/message-studio";
 import { Gate } from "@/components/shell/gate";
 import { Page, PageHeader } from "@/components/ui/kit";
 import { aiStatusAction } from "@/lib/actions/ai";
+import { resolveOfferService } from "@/lib/config/crm";
 import { listCompanies } from "@/lib/services/companies";
 import { listDeals } from "@/lib/services/deals";
 import { listDrafts, listTemplates, messageContext } from "@/lib/services/messages";
@@ -18,6 +19,9 @@ export default function MensagensPage({ searchParams }: PageProps<"/mensagens">)
         const [companies, deals, templates, drafts, services, ai] = await Promise.all([listCompanies(ctx, { limit: 300 }), listDeals(ctx, { open: true, limit: 300 }), listTemplates(ctx), listDrafts(ctx, { limit: 12 }), listServices(ctx), aiStatusAction()]);
         const initial = one("oportunidade") ? `d:${one("oportunidade")}` : one("empresa") ? `c:${one("empresa")}` : "";
         const initialContext = initial ? await messageContext(ctx, initial.startsWith("d:") ? { dealId: initial.slice(2) } : { companyId: initial.slice(2) }).catch(() => null) : null;
+        const serviceNames = services.map((s) => s.name);
+        const paramService = typeof sp.servico === "string" ? (resolveOfferService(sp.servico) ?? (serviceNames.includes(sp.servico) ? sp.servico : "")) : "";
+        const initialService = initialContext?.serviceType || paramService || "";
         const options = [
           ...deals.map((d) => ({ value: `d:${d.id}`, label: `${d.companyName} — ${d.title}` })),
           ...companies.map((c) => ({ value: `c:${c.id}`, label: `${c.name} (empresa)` })),
@@ -30,11 +34,12 @@ export default function MensagensPage({ searchParams }: PageProps<"/mensagens">)
                 options={options}
                 templates={templates.map((t) => ({ id: t.id, name: t.name, objective: t.objective, service: t.service, tone: t.tone, channel: t.channel, body: t.body, version: t.version }))}
                 drafts={drafts.map((d) => ({ id: d.id, objective: d.objective, body: d.body, status: d.status, origin: d.origin, createdAt: d.createdAt, companyId: d.companyId }))}
-                services={services.map((s) => s.name)}
+                services={serviceNames}
                 sender={process.env.MEU_NOME || "Miguel"}
                 ai={ai}
                 initial={initialContext ? initial : ""}
                 initialContext={initialContext}
+                initialService={initialService}
               />
             </Page>
           </>

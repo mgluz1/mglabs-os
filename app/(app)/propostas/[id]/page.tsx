@@ -17,7 +17,7 @@ export default function ProposalPage({ params }: PageProps<"/propostas/[id]">) {
         const [[company], deal] = await Promise.all([db.select({ name: crmCompanies.name }).from(crmCompanies).where(eq(crmCompanies.id, proposal.companyId)), proposal.dealId ? db.select({ title: crmDeals.title }).from(crmDeals).where(eq(crmDeals.id, proposal.dealId)) : Promise.resolve([])]);
         return (
           <>
-            <PageHeader back={{ href: "/propostas", label: "Propostas" }} title={proposal.title} description={`${company?.name ?? ""} · versão ${proposal.version}`} />
+            <PageHeader back={proposal.dealId ? { href: `/crm?deal=${proposal.dealId}`, label: "Oportunidade" } : { href: "/crm?aba=propostas", label: "CRM · Propostas" }} title={proposal.title} description={`${company?.name ?? ""} · versão ${proposal.version}`} />
             <Page wide>
               <ProposalEditor
                 key={proposal.id + proposal.updatedAt.getTime()}

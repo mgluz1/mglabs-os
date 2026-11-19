@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
-import { leadDetailAction, openInStudioAction, optOutAction } from "@/app/actions";
+import { leadDetailAction, openInStudioAction, optOutAction, prospectStateAction, retryAuditsAction } from "@/app/actions";
 import { badgesFor } from "@/components/lead/badges";
 import { CATEGORY_ICON, ScoreRing, Stars } from "@/components/radar/ui";
 import { addPlaceToCrmAction, moveDealAction } from "@/lib/actions/crm";
@@ -14,6 +14,7 @@ import { LOST_REASONS, STAGE_DEFS } from "@/lib/config/crm";
 import { fmtDateTime } from "@/lib/dates";
 import { distanceM, type LatLng } from "@/lib/geo";
 import { parseBrPhone, waLink } from "@/lib/phone";
+import { APPROACH_STATUS_LABEL, deriveApproachStatus, isSnoozed } from "@/lib/prospecting";
 import { signalsFor } from "@/lib/radar-signals";
 import type { Activity, Contact, RadarPlace } from "@/lib/types";
 
@@ -32,7 +33,7 @@ function Card({ title, children, className = "" }: { title: string; children: Re
   );
 }
 
-export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { placeId: string; onClose: () => void; onChanged?: () => void; demo?: RadarPlace; center?: LatLng }) {
+export function LeadPanel({ placeId, onClose, onChanged, demo, center, offer }: { placeId: string; onClose: () => void; onChanged?: () => void; demo?: RadarPlace; center?: LatLng; offer?: string | null }) {
   const router = useRouter();
   const [place, setPlace] = useState<RadarPlace | null>(demo ?? null);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -81,6 +82,8 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
   const blocked = place.optedOut;
   const dist = center ? distanceM(center, { lat: place.lat, lng: place.lng }) : null;
   const signals = signalsFor(place);
+  const approachStatus = deriveApproachStatus(place);
+  const hiddenInQueue = place.ignored || isSnoozed(place);
   const reason = signals.length ? signals.join("; ").replace(/^./, (c) => c.toUpperCase()) + "." : place.auditStatus === "done" ? "Nenhum sinal forte de oportunidade digital." : null;
 
   const refresh = async () => {
@@ -93,7 +96,7 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
       if (demo) return;
       let dealId = place.leadId;
       if (!dealId) {
-        const r = await openInStudioAction(place.id); // cria empresa + oportunidade sem duplicar
+        const r = await openInStudioAction(place.id, offer); // cria empresa + oportunidade sem duplicar
         if (!r.ok) return setError(r.error);
         dealId = r.data.dealId;
       }
@@ -106,9 +109,11 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
 
   const writeMessage = () =>
     start(async () => {
-      const r = await openInStudioAction(place.id);
+      const r = await openInStudioAction(place.id, offer);
       if (!r.ok) return setError(r.error);
-      router.push(`/mensagens?empresa=${r.data.companyId}&oportunidade=${r.data.dealId}`);
+      const qs = new URLSearchParams({ empresa: r.data.companyId, oportunidade: r.data.dealId });
+      if (r.data.serviceType) qs.set("servico", r.data.serviceType);
+      router.push(`/mensagens?${qs.toString()}`);
     });
 
   return (
@@ -134,12 +139,19 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
         </p>
 
         <div className="flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-brand/30 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">
+            {APPROACH_STATUS_LABEL[approachStatus]}
+          </span>
           {badgesFor(place).map((b) => (
             <span key={b.label} className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">
               {b.label}
             </span>
           ))}
-          {waPhone && <span className="rounded-full border border-line px-2.5 py-1 text-xs text-muted">{wa?.confirmed ? "WhatsApp confirmado" : "Celular"}</span>}
+          {waPhone && (
+            <span className="rounded-full border border-line px-2.5 py-1 text-xs text-muted">
+              {wa?.confirmed ? "WhatsApp confirmado" : "Celular (WhatsApp não confirmado)"}
+            </span>
+          )}
         </div>
 
         {/* funil */}
@@ -180,12 +192,34 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
         {blocked && <p className="rounded-xl bg-danger/10 p-3 text-sm text-danger">Este negócio pediu para não ser contatado. Os botões de contato foram desativados.</p>}
 
         <Card title="Por que é uma oportunidade">
-          {place.auditStatus !== "done" ? (
+          {place.auditStatus === "pending" || place.auditStatus === "running" || !place.auditStatus ? (
             <p className="flex items-center gap-2 text-sm text-brand">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analisando o site…
             </p>
           ) : (
             <>
+              {place.auditStatus === "error" && (
+                <div className="mb-3 rounded-xl border border-danger/25 bg-danger/8 p-3 text-sm">
+                  <p className="font-medium text-danger">Não foi possível concluir a auditoria do site</p>
+                  {place.auditError && <p className="mt-0.5 text-xs text-muted">Motivo: {place.auditError}</p>}
+                  {!demo && place.auditError !== "endereço não permitido" && place.auditError !== "robots.txt não permite" && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() =>
+                        start(async () => {
+                          const r = await retryAuditsAction([place.id]);
+                          if (!r.ok) setError(r.error);
+                          await refresh();
+                        })
+                      }
+                      className="mt-2 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                    >
+                      Tentar auditoria novamente
+                    </button>
+                  )}
+                </div>
+              )}
               {reason && <p className="text-[15px] leading-relaxed">{reason}</p>}
               {place.rules.length > 0 && (
                 <ul className="mt-3 space-y-1.5 border-t border-line pt-3 text-sm">
@@ -202,6 +236,11 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
                   ))}
                 </ul>
               )}
+              <p className="mt-3 border-t border-line pt-2 text-[11px] text-muted">
+                Fonte: {place.source === "overture" ? "Overture Maps" : "Google Places"}
+                {place.auditedAt ? ` · Auditoria: ${fmtDateTime(place.auditedAt)}` : " · Site não verificado"}
+                {place.scoredAt ? ` · Score: ${fmtDateTime(place.scoredAt)}` : ""}
+              </p>
             </>
           )}
         </Card>
@@ -229,7 +268,7 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
                       )}
                       <span className="block text-xs text-muted">{SOURCE_LABEL[c.source]}</span>
                     </span>
-                    {phone && <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-muted">{c.confirmed && c.kind === "whatsapp" ? "WhatsApp" : phone.mobile ? "celular" : "fixo"}</span>}
+                    {phone && <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-muted">{c.confirmed && c.kind === "whatsapp" ? "WhatsApp confirmado" : phone.mobile ? "celular (não confirmado)" : "fixo"}</span>}
                   </li>
                 );
               })}
@@ -253,10 +292,55 @@ export function LeadPanel({ placeId, onClose, onChanged, demo, center }: { place
         {error && <p className="text-sm text-danger">{error}</p>}
 
         {!blocked && (
-          <button type="button" disabled={pending || !!demo} onClick={writeMessage} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand py-3.5 text-[15px] font-semibold text-brand-on shadow-[0_12px_28px_-12px_var(--brand)] hover:bg-brand-hover disabled:opacity-60">
-            {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <MessageSquareText className="h-5 w-5" />}
-            Escrever mensagem
-          </button>
+          <div className="space-y-2">
+            <button type="button" disabled={pending || !!demo} onClick={writeMessage} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand py-3.5 text-[15px] font-semibold text-brand-on shadow-[0_12px_28px_-12px_var(--brand)] hover:bg-brand-hover disabled:opacity-60">
+              {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <MessageSquareText className="h-5 w-5" />}
+              Escrever mensagem
+            </button>
+            {!demo && (
+              <div className="flex flex-wrap gap-2">
+                {approachStatus === "nao_abordado" || approachStatus === "mensagem_preparada" ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => start(async () => { const r = await prospectStateAction(place.id, { action: "contatado", offer }); if (!r.ok) setError(r.error); await refresh(); })}
+                    className="btn btn-ghost btn-sm flex-1"
+                  >
+                    Marcar contato realizado
+                  </button>
+                ) : null}
+                {hiddenInQueue ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => start(async () => { const r = await prospectStateAction(place.id, { action: "restaurar" }); if (!r.ok) setError(r.error); await refresh(); })}
+                    className="btn btn-ghost btn-sm flex-1"
+                  >
+                    Restaurar na fila
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => start(async () => { const r = await prospectStateAction(place.id, { action: "adiar", days: 7 }); if (!r.ok) setError(r.error); await refresh(); })}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      Adiar 7d
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => start(async () => { const r = await prospectStateAction(place.id, { action: "ignorar" }); if (!r.ok) setError(r.error); await refresh(); })}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      Ignorar
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           {place.leadId ? (

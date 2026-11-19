@@ -50,15 +50,15 @@ export function ProposalEditor({ proposal: p, items: initialItems, events, servi
             <Badge tone={p.status === "aprovada" ? "ok" : p.status === "recusada" || p.status === "expirada" ? "danger" : "info"}>{labelOf(PROPOSAL_STATUS, p.status)}</Badge>
             <span className="text-xs text-muted">v{p.version}{p.sentAt ? ` · enviada em ${fmtDate(p.sentAt)}` : ""}</span>
             <span className="ml-auto flex flex-wrap gap-2">
-              {editable && <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => save(() => status("enviada", "Marcada como enviada. A proposta agora está congelada."))}><Send className="h-4 w-4" /> Marcar como enviada</button>}
+              {editable && <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => save(() => status("enviada", "Marcada como enviada. A proposta agora está congelada."))}><Send className="h-4 w-4" aria-hidden /> Marcar como enviada</button>}
               {(p.status === "enviada" || p.status === "visualizada") && <>
-                {p.status === "enviada" && <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => status("visualizada", "Registrada como visualizada.")}>Visualizada</button>}
-                <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => status("aprovada", "Proposta aprovada.")}><Check className="h-4 w-4" /> Aprovada</button>
-                <button className="btn btn-danger btn-sm" disabled={pending} onClick={() => status("recusada", "Registrada como recusada.")}><X className="h-4 w-4" /> Recusada</button>
-                <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => status("expirada", "Marcada como expirada.")}>Expirada</button>
+                {p.status === "enviada" && <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => status("visualizada", "Registrada como visualizada.")}>Visualizada</button>}
+                <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => status("aprovada", "Proposta aprovada.")}><Check className="h-4 w-4" aria-hidden /> Aprovada</button>
+                <button type="button" className="btn btn-danger btn-sm" disabled={pending} onClick={() => status("recusada", "Registrada como recusada.")}><X className="h-4 w-4" aria-hidden /> Recusada</button>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => status("expirada", "Marcada como expirada.")}>Expirada</button>
               </>}
-              {!editable && <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => run(() => newProposalVersionAction(p.id), { ok: "Nova versão criada.", onOk: (v) => router.push(`/propostas/${v.id}`), refresh: false })}><Copy className="h-4 w-4" /> Nova versão</button>}
-              {editable && <ConfirmButton onConfirm={() => run(() => deleteProposalAction(p.id), { ok: "Rascunho excluído.", onOk: () => router.push("/propostas"), refresh: false })}>Excluir</ConfirmButton>}
+              {!editable && <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => run(() => newProposalVersionAction(p.id), { ok: "Nova versão criada.", onOk: (v) => router.push(`/propostas/${v.id}`), refresh: false })}><Copy className="h-4 w-4" aria-hidden /> Nova versão</button>}
+              {editable && <ConfirmButton ariaLabel="Excluir rascunho da proposta" onConfirm={() => run(() => deleteProposalAction(p.id), { ok: "Rascunho excluído.", onOk: () => router.push("/crm?aba=propostas"), refresh: false })}>Excluir</ConfirmButton>}
             </span>
           </div>
           {p.status === "aprovada" && p.dealId && <p className="mt-3 text-sm text-muted">Proposta aprovada. Para fechar o negócio e criar projeto e cobranças, use <Link href={`/crm?deal=${p.dealId}`} className="text-brand hover:underline">“Fechar e criar projeto” na oportunidade</Link>.</p>}
@@ -81,8 +81,8 @@ export function ProposalEditor({ proposal: p, items: initialItems, events, servi
         <SectionCard title="Itens e investimento" action={editable && <select className="input w-auto py-1 text-xs" value="" onChange={(e) => { const s = services.find((x) => x.id === e.target.value); if (s) setItems((xs) => [...xs, { serviceId: s.id, description: s.name, quantity: 1, price: centsToInput(s.basePriceCents) }]); if (s?.defaultScope && !f.scope) setF((x) => ({ ...x, scope: s.defaultScope! })); }} aria-label="Adicionar do catálogo"><option value="">+ Do catálogo…</option>{services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}>
           <fieldset disabled={!editable || pending} className="space-y-2">
             {items.map((it, i) => (
-              <div key={i} className="grid grid-cols-[1fr_64px_120px_auto] items-center gap-2">
-                <input className="input" value={it.description} onChange={(e) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} placeholder="Descrição do item" aria-label="Descrição" />
+              <div key={i} className="grid grid-cols-[68px_1fr_auto] items-center gap-2 sm:grid-cols-[1fr_64px_120px_auto]">
+                <input className="input col-span-3 sm:col-span-1" value={it.description} onChange={(e) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} placeholder="Descrição do item" aria-label="Descrição" />
                 <input type="number" min={1} className="input" value={it.quantity} onChange={(e) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, quantity: Math.max(1, Number(e.target.value) || 1) } : x)))} aria-label="Quantidade" />
                 <MoneyInput value={it.price} onChange={(v) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, price: v } : x)))} />
                 <button type="button" className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))} aria-label="Remover item"><Trash2 className="h-4 w-4" /></button>

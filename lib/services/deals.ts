@@ -8,12 +8,13 @@ import { SOURCES } from "@/lib/config/crm";
 import { db } from "@/lib/db";
 import { logActivity, timelineFor } from "@/lib/services/activities";
 import { companyFromPlace, createCompany, stageByKey, companyInput } from "@/lib/services/companies";
-import { assertWrite, audit, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
+import { assertAdmin, assertAnyModule, assertModule, assertWrite, audit, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { cents, dateOnly, instant, limitOf, optStr, parse, reqStr, tagsSchema } from "@/lib/services/util";
 
 const sourceIds = SOURCES.map((s) => s.id) as [string, ...string[]];
 
 export async function listStages(ctx: Ctx) {
+  assertAnyModule(ctx, "comercial", "operacao", "financeiro");
   return db.select().from(crmStages).where(eq(crmStages.workspaceId, ctx.workspaceId)).orderBy(asc(crmStages.position));
 }
 
@@ -81,6 +82,7 @@ function toCard(r: DealRowRaw): DealCard {
 export type DealFilters = { q?: string; stage?: string; source?: string; service?: string; companyId?: string; overdue?: boolean; open?: boolean; limit?: number };
 
 export async function listDeals(ctx: Ctx, f: DealFilters = {}): Promise<DealCard[]> {
+  assertModule(ctx, "comercial");
   const q = f.q?.trim();
   const { rows } = await db.execute<DealRowRaw>(sql`
     ${DEAL_SELECT}
@@ -98,6 +100,7 @@ export async function listDeals(ctx: Ctx, f: DealFilters = {}): Promise<DealCard
 }
 
 export async function getDealCard(ctx: Ctx, id: string): Promise<DealCard> {
+  assertModule(ctx, "comercial");
   const { rows } = await db.execute<DealRowRaw>(sql`${DEAL_SELECT} where d.workspace_id = ${ctx.workspaceId} and d.id = ${id}`);
   if (!rows[0]) throw new NotFoundError("Oportunidade");
   return toCard(rows[0]);
@@ -105,6 +108,7 @@ export async function getDealCard(ctx: Ctx, id: string): Promise<DealCard> {
 
 /** Ficha completa da oportunidade (drawer do CRM e MCP get_lead). */
 export async function getDeal(ctx: Ctx, id: string) {
+  assertModule(ctx, "comercial");
   const card = await getDealCard(ctx, id);
   const [deal] = await db.select().from(crmDeals).where(eq(crmDeals.id, id));
   const [company] = await db.select().from(crmCompanies).where(eq(crmCompanies.id, card.companyId));
@@ -149,6 +153,7 @@ export type DealInput = z.input<typeof dealInput>;
 
 export async function createDeal(ctx: Ctx, raw: DealInput): Promise<DealCard> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(dealInput, raw);
   const [company] = await db.select({ id: crmCompanies.id }).from(crmCompanies).where(and(eq(crmCompanies.id, i.companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
   if (!company) throw new NotFoundError("Empresa");
@@ -167,6 +172,7 @@ export async function createDeal(ctx: Ctx, raw: DealInput): Promise<DealCard> {
 /** Cadastro manual: cria empresa nova (ou usa uma existente) e a oportunidade, independente do Radar. */
 export async function createDealWithCompany(ctx: Ctx, input: { companyId?: string; company?: z.input<typeof companyInput>; deal: Omit<DealInput, "companyId"> }): Promise<DealCard> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   let companyId = input.companyId;
   if (!companyId) {
     if (!input.company) throw new ValidationError("Informe a empresa.");
@@ -178,20 +184,30 @@ export async function createDealWithCompany(ctx: Ctx, input: { companyId?: strin
 /** Radar → CRM: empresa + oportunidade sem duplicar. */
 export async function addPlaceToCrm(ctx: Ctx, placeId: string, opts: { serviceType?: string | null } = {}): Promise<{ dealId: string; companyId: string; created: boolean }> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const { company, created: companyCreated } = await companyFromPlace(ctx, placeId);
   const [open] = await db
-    .select({ id: crmDeals.id })
+    .select({ id: crmDeals.id, serviceType: crmDeals.serviceType })
     .from(crmDeals)
     .innerJoin(crmStages, eq(crmStages.id, crmDeals.stageId))
     .where(and(eq(crmDeals.companyId, company.id), eq(crmStages.kind, "open")))
     .limit(1);
-  if (open) return { dealId: open.id, companyId: company.id, created: false };
+  if (open) {
+    if (opts.serviceType && open.serviceType !== opts.serviceType) {
+      await db
+        .update(crmDeals)
+        .set({ serviceType: opts.serviceType, updatedAt: new Date() })
+        .where(and(eq(crmDeals.id, open.id), eq(crmDeals.workspaceId, ctx.workspaceId)));
+    }
+    return { dealId: open.id, companyId: company.id, created: false };
+  }
   const deal = await createDeal(ctx, { companyId: company.id, title: `${opts.serviceType ? opts.serviceType + " — " : ""}${company.name}`, serviceType: opts.serviceType ?? null, source: "radar", stage: "novo" });
   return { dealId: deal.id, companyId: company.id, created: companyCreated || true };
 }
 
 export async function updateDeal(ctx: Ctx, id: string, raw: Partial<Omit<DealInput, "companyId" | "stage">>): Promise<DealCard> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const i = parse(dealInput.omit({ companyId: true, stage: true }).partial(), raw);
   const before = await getDealCard(ctx, id);
   const patch: Partial<typeof crmDeals.$inferInsert> = { ...i, updatedAt: new Date() };
@@ -211,6 +227,7 @@ export async function updateDeal(ctx: Ctx, id: string, raw: Partial<Omit<DealInp
 /** Move no funil. Perdido exige motivo; ganho/perdido carimbam a data. Reabrir limpa os carimbos. */
 export async function moveDeal(ctx: Ctx, id: string, stageKey: string, opts: { lostReason?: string | null } = {}): Promise<DealCard> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const before = await getDealCard(ctx, id);
   const stage = await stageByKey(ctx, stageKey);
   if (before.stageKey === stage.key) return before;
@@ -255,6 +272,7 @@ async function stageLabel(ctx: Ctx, key: string) {
 
 export async function addNote(ctx: Ctx, input: { dealId?: string; companyId?: string; kind?: "nota" | "ligacao" | "resposta" | "reuniao"; channel?: string | null; content: string }) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const content = input.content?.trim();
   if (!content) throw new ValidationError("Escreva algo.");
   let companyId = input.companyId ?? null;
@@ -269,7 +287,8 @@ export async function addNote(ctx: Ctx, input: { dealId?: string; companyId?: st
 
 export async function deleteDeal(ctx: Ctx, id: string) {
   assertWrite(ctx);
-  if (ctx.role !== "owner" && ctx.role !== "admin") throw new ValidationError("Só administradores podem excluir oportunidades.");
+  assertModule(ctx, "comercial");
+  assertAdmin(ctx, "Só administradores podem excluir oportunidades.");
   await db.delete(crmDeals).where(and(eq(crmDeals.id, id), eq(crmDeals.workspaceId, ctx.workspaceId)));
   await audit(ctx, "delete", "deal", id);
 }
@@ -288,7 +307,8 @@ export function pipelineTotals(deals: DealCard[]) {
 /** Configurações: renomear etapa e ajustar a probabilidade padrão (a ordem e o tipo ficam fixos). */
 export async function updateStage(ctx: Ctx, key: string, patch: { label?: string; probability?: number }) {
   assertWrite(ctx);
-  if (ctx.role !== "owner" && ctx.role !== "admin") throw new ValidationError("Só administradores editam as etapas.");
+  assertModule(ctx, "config");
+  if (ctx.role !== "owner" && ctx.role !== "admin") throw new ForbiddenError("Só administradores editam as etapas.");
   const label = patch.label?.trim();
   if (label !== undefined && (!label || label.length > 40)) throw new ValidationError("Nome da etapa inválido.");
   if (patch.probability !== undefined && (!Number.isInteger(patch.probability) || patch.probability < 0 || patch.probability > 100)) throw new ValidationError("Probabilidade inválida.");

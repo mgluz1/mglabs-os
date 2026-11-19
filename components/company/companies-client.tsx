@@ -14,22 +14,29 @@ import type { CompanyListItem } from "@/lib/services/companies";
 
 type ContactItem = { id: string; name: string; role: string | null; email: string | null; phone: string | null; whatsapp: string | null; companyId: string | null; companyName: string | null; optedOut: boolean; lastContactAt: Date | null };
 
-export function CompaniesClient({ tab, status, q, companies, contacts }: { tab: "empresas" | "contatos"; status: string; q: string; companies: CompanyListItem[]; contacts: ContactItem[] }) {
+export function CompaniesClient({ tab, status, q, companies, contacts, basePath = "/crm?aba=empresas" }: { tab: "empresas" | "contatos"; status: string; q: string; companies: CompanyListItem[]; contacts: ContactItem[]; basePath?: string }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [open, setOpen] = useState(sp.get("novo") === "1");
   const [term, setTerm] = useState(q);
   const go = (patch: Record<string, string>) => {
-    const next = new URLSearchParams({ aba: tab, ...(status ? { status } : {}), ...(term ? { q: term } : {}), ...patch });
-    for (const [k, v] of [...next]) if (!v) next.delete(k);
-    router.push(`/empresas?${next}`);
+    const [path, qs] = basePath.split("?");
+    const next = new URLSearchParams(qs ?? "");
+    next.set("sub", tab);
+    if (status) next.set("status", status);
+    if (term) next.set("q", term);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
+    router.push(`${path}?${next}`);
   };
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div role="tablist" className="flex rounded-lg border border-line p-0.5 text-sm">
           {(["empresas", "contatos"] as const).map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} onClick={() => go({ aba: t })} className={`rounded-md px-3 py-1.5 capitalize ${tab === t ? "bg-brand/15 font-medium text-brand" : "text-muted hover:text-fg"}`}>{t}</button>
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => go({ sub: t })} className={`rounded-md px-3 py-1.5 capitalize ${tab === t ? "bg-brand/15 font-medium text-brand" : "text-muted hover:text-fg"}`}>{t}</button>
           ))}
         </div>
         <form className="relative min-w-[220px] flex-1 sm:max-w-sm" onSubmit={(e) => { e.preventDefault(); go({ q: term }); }}>

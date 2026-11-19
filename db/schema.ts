@@ -458,11 +458,15 @@ export const crmMessageDrafts = pgTable(
     templateId: uuid("template_id").references(() => crmMessageTemplates.id, { onDelete: "set null" }),
     facts: jsonb("facts"),
     status: text("status").notNull().default("rascunho"), // rascunho | enviada | descartada
+    idempotencyKey: text("idempotency_key"),
     sentAt: ts("sent_at"),
     createdBy: text("created_by"),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [index("crm_message_drafts_ws_idx").on(t.workspaceId, t.createdAt)],
+  (t) => [
+    index("crm_message_drafts_ws_idx").on(t.workspaceId, t.createdAt),
+    uniqueIndex("crm_message_drafts_idempotency_uq").on(t.workspaceId, t.idempotencyKey).where(sql`${t.idempotencyKey} is not null`),
+  ],
 );
 
 export const crmServices = pgTable("crm_services", {

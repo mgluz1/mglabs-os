@@ -29,6 +29,9 @@ export type RadarPlace = {
   googleWebsite: string | null;
   googleMapsUri: string | null;
   auditStatus: string | null;
+  auditError: string | null;
+  auditedAt: string | null;
+  scoredAt: string | null;
   siteType: "sem_site" | "so_rede_social" | "site_proprio" | null;
   https: boolean | null;
   viewport: boolean | null;
@@ -45,6 +48,11 @@ export type RadarPlace = {
   leadStage: string | null;
   /** Empresa no CRM ligada a este lugar (se houver). */
   companyId: string | null;
+  /** Ignorado ou adiado na fila de prospecção. */
+  ignored: boolean;
+  snoozedUntil: string | null;
+  /** Possui rascunho de mensagem salvo ainda não enviado. */
+  hasDraft: boolean;
   /** Pediu para não ser contatado: nenhum botão de contato aparece. */
   optedOut: boolean;
 };

@@ -1,9 +1,11 @@
 import { ImportOvertureButton } from "@/components/import-overture-button";
+import { SettingsNav } from "@/components/settings/settings-nav";
 import { Gate } from "@/components/shell/gate";
 import { Badge, Page, PageHeader, SectionCard } from "@/components/ui/kit";
 import { checkDatabase } from "@/lib/health";
 import { radarInfo } from "@/lib/places/search";
 import { aiConfig } from "@/lib/ai/gemini";
+import { assertModule, canModule } from "@/lib/services/ctx";
 
 export const metadata = { title: "Status" };
 
@@ -11,11 +13,14 @@ export default function StatusPage() {
   return (
     <Gate>
       {async (ctx) => {
+        assertModule(ctx, "config");
+        const canImport = ctx.role === "owner" || ctx.role === "admin";
         const [db, ov] = await Promise.all([checkDatabase(), radarInfo()]);
         const ai = aiConfig();
         return (
           <>
-            <PageHeader title="Status" description={`Integridade do banco, da base aberta e das integrações. Conectado como ${ctx.email ?? "usuário"}.`} />
+            <PageHeader title="Sistema (Status)" description={`Integridade do banco, da base aberta e das integrações. Conectado como ${ctx.email ?? "usuário"}.`} />
+            <SettingsNav current="status" canFinance={canModule(ctx, "financeiro")} canConfig />
             <Page>
               <div className="grid gap-4 lg:grid-cols-2">
                 <SectionCard title="Banco de dados (Neon)">
@@ -38,7 +43,7 @@ export default function StatusPage() {
                     <li>Última importação: {ov.loaded_at ? new Date(ov.loaded_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "nunca"}</li>
                   </ul>
                   <p className="mt-2 text-xs text-muted">Atualiza sozinha todo mês (GitHub Action no dia 25 e importação no dia 26).</p>
-                  <div className="mt-3"><ImportOvertureButton /></div>
+                  {canImport && <div className="mt-3"><ImportOvertureButton /></div>}
                 </SectionCard>
                 <SectionCard title="Integrações">
                   <ul className="space-y-1.5 text-sm">

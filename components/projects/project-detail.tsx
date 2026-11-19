@@ -49,11 +49,11 @@ export function ProjectDetail({ data, tasks, receivables }: { data: Data; tasks:
         <Badge tone={p.status === "entregue" ? "ok" : "brand"}>{labelOf(PROJECT_STATUS, p.status)}</Badge>
         {data.deal && <Link href={`/crm?deal=${data.deal.id}`} className="text-xs text-muted hover:text-fg hover:underline">Negócio: {data.deal.title}</Link>}
         {data.proposal && <Link href={`/propostas/${data.proposal.id}`} className="text-xs text-muted hover:text-fg hover:underline">Proposta v{data.proposal.version}</Link>}
-        <button className="btn btn-ghost btn-sm ml-auto" onClick={exportMd}><Clipboard className="h-4 w-4" /> Copiar briefing (Markdown)</button>
+        <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={exportMd}><Clipboard className="h-4 w-4" aria-hidden /> Copiar briefing (Markdown)</button>
       </div>
 
-      <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-line">
-        {TABS.filter(([k]) => k !== "financeiro" || receivables) .map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm ${tab === k ? "border-brand font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>)}
+      <div role="tablist" aria-label="Seções do projeto" className="flex gap-1 overflow-x-auto border-b border-line">
+        {TABS.filter(([k]) => k !== "financeiro" || receivables) .map(([k, l]) => <button type="button" key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm ${tab === k ? "border-brand font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>)}
       </div>
 
       {tab === "geral" && (
@@ -99,7 +99,7 @@ function SectionEditor({ projectId, section, initial, hint }: { projectId: strin
     <SectionCard title={labelOf(PROJECT_PHASES, section)} action={pendingItems > 0 && <Badge tone="warn">{pendingItems} pendência(s) [CONFIRMAR]</Badge>}>
       <p className="mb-3 text-sm text-muted">{hint}</p>
       <textarea className="input min-h-[280px] font-mono text-[13px]" value={text} onChange={(e) => setText(e.target.value)} aria-label={labelOf(PROJECT_PHASES, section)} />
-      <div className="mt-3 flex justify-end"><button className="btn btn-primary" disabled={pending || text === initial} onClick={() => run(() => saveSectionAction(projectId, section, text), { ok: "Seção salva." })}>Salvar seção</button></div>
+      <div className="mt-3 flex justify-end"><button type="button" className="btn btn-primary" disabled={pending || text === initial} onClick={() => run(() => saveSectionAction(projectId, section, text), { ok: "Seção salva." })}>Salvar seção</button></div>
     </SectionCard>
   );
 }
@@ -115,12 +115,12 @@ function ProjectTasks({ projectId, companyId, tasks }: { projectId: string; comp
         <input className="input min-w-[200px] flex-1" placeholder="Nova tarefa do projeto" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Título" />
         <input type="date" className="input w-auto" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Vencimento" />
         <select className="input w-auto" value={prio} onChange={(e) => setPrio(e.target.value)} aria-label="Prioridade">{PRIORITIES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
-        <button className="btn btn-primary" disabled={pending || !title.trim()}><Plus className="h-4 w-4" /></button>
+        <button className="btn btn-primary" disabled={pending || !title.trim()} aria-label="Adicionar tarefa"><Plus className="h-4 w-4" aria-hidden /></button>
       </form>
       <ul className="space-y-1.5">
         {tasks.map((t) => { const done = t.status === "concluida"; return (
           <li key={t.id} className="flex items-center gap-3 rounded-lg border border-line bg-elevated px-3 py-2 text-sm">
-            <button disabled={done || pending} aria-label="Concluir tarefa" onClick={() => run(() => completeTaskAction(t.id), { ok: "Tarefa concluída." })} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${done ? "border-brand bg-brand text-brand-on" : "border-fg/30 hover:border-brand"}`}>{done && <Check className="h-3.5 w-3.5" />}</button>
+            <button type="button" disabled={done || pending} aria-label="Concluir tarefa" onClick={() => run(() => completeTaskAction(t.id), { ok: "Tarefa concluída." })} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${done ? "border-brand bg-brand text-brand-on" : "border-fg/30 hover:border-brand"}`}>{done && <Check className="h-3.5 w-3.5" aria-hidden />}</button>
             <span className={`min-w-0 flex-1 truncate ${done ? "text-muted line-through" : ""}`}>{t.title}</span>
             {!done && <Badge tone={priorityTone(t.priority)}>{labelOf(PRIORITIES, t.priority)}</Badge>}
             {t.dueAt && <span className="text-xs text-muted">{fmtDate(t.dueAt)}</span>}
@@ -146,16 +146,16 @@ function Files({ projectId, documents, links }: { projectId: string; documents: 
           <select className="input" value={doc.rightsStatus} onChange={(e) => setDoc({ ...doc, rightsStatus: e.target.value })} aria-label="Direito de uso">{RIGHTS.map(([v, l]) => <option key={v} value={v}>{v ? `Uso: ${l}` : "Direito de uso: —"}</option>)}</select>
           <button className="btn btn-primary col-span-2" disabled={pending}>Adicionar</button>
         </form>
-        <ul className="space-y-1.5">{documents.map((d) => <li key={d.id} className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-2 text-sm"><span className="min-w-0 flex-1 truncate">{d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-brand hover:underline">{d.title}<ExternalLink className="h-3 w-3" /></a> : d.title}</span><Badge>{d.kind}</Badge>{d.rightsStatus && <Badge tone={d.rightsStatus === "nao_autorizado" ? "danger" : d.rightsStatus === "recebido" ? "ok" : "warn"}>{d.rightsStatus.replace("_", " ")}</Badge>}<ConfirmButton className="rounded p-1 text-muted hover:text-danger" label="Excluir?" onConfirm={() => run(() => deleteDocumentAction(projectId, d.id))}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton></li>)}{documents.length === 0 && <li className="text-sm text-muted">Nenhum documento.</li>}</ul>
+        <ul className="space-y-1.5">{documents.map((d) => <li key={d.id} className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-2 text-sm"><span className="min-w-0 flex-1 truncate">{d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-brand hover:underline">{d.title}<ExternalLink className="h-3 w-3" aria-hidden /></a> : d.title}</span><Badge>{d.kind}</Badge>{d.rightsStatus && <Badge tone={d.rightsStatus === "nao_autorizado" ? "danger" : d.rightsStatus === "recebido" ? "ok" : "warn"}>{d.rightsStatus.replace("_", " ")}</Badge>}<ConfirmButton className="rounded p-1 text-muted hover:text-danger" label="Excluir?" ariaLabel={`Excluir ${d.title}`} onConfirm={() => run(() => deleteDocumentAction(projectId, d.id))}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton></li>)}{documents.length === 0 && <li className="text-sm text-muted">Nenhum documento.</li>}</ul>
         <p className="mt-3 text-xs text-muted">Upload de arquivos ainda não existe: guarde o link e o direito de uso de cada material. Nunca use material sem autorização.</p>
       </SectionCard>
       <SectionCard title="Links de referência">
-        <form className="mb-3 grid grid-cols-[1fr_1fr_auto] gap-2" onSubmit={(e) => { e.preventDefault(); run(() => setLinksAction(projectId, [...links, link]), { ok: "Link adicionado.", onOk: () => setLink({ label: "", url: "" }) }); }}>
+        <form className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]" onSubmit={(e) => { e.preventDefault(); run(() => setLinksAction(projectId, [...links, link]), { ok: "Link adicionado.", onOk: () => setLink({ label: "", url: "" }) }); }}>
           <input className="input" placeholder="Rótulo" value={link.label} onChange={(e) => setLink({ ...link, label: e.target.value })} aria-label="Rótulo" />
           <input required className="input" placeholder="https://…" value={link.url} onChange={(e) => setLink({ ...link, url: e.target.value })} aria-label="URL" />
-          <button className="btn btn-primary" disabled={pending}><Plus className="h-4 w-4" /></button>
+          <button className="btn btn-primary" disabled={pending} aria-label="Adicionar link"><Plus className="h-4 w-4" aria-hidden /></button>
         </form>
-        <ul className="space-y-1.5">{links.map((l, i) => <li key={i} className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-2 text-sm"><a href={l.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:text-brand hover:underline">{l.label || l.url}</a><ConfirmButton className="rounded p-1 text-muted hover:text-danger" label="Remover?" onConfirm={() => run(() => setLinksAction(projectId, links.filter((_, j) => j !== i)))}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton></li>)}{links.length === 0 && <li className="text-sm text-muted">Nenhum link.</li>}</ul>
+        <ul className="space-y-1.5">{links.map((l, i) => <li key={i} className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-2 text-sm"><a href={l.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:text-brand hover:underline">{l.label || l.url}</a><ConfirmButton className="rounded p-1 text-muted hover:text-danger" label="Remover?" ariaLabel={`Remover ${l.label || l.url}`} onConfirm={() => run(() => setLinksAction(projectId, links.filter((_, j) => j !== i)))}><Trash2 className="h-3.5 w-3.5" /></ConfirmButton></li>)}{links.length === 0 && <li className="text-sm text-muted">Nenhum link.</li>}</ul>
       </SectionCard>
     </div>
   );

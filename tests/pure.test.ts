@@ -125,15 +125,25 @@ describe("Lead Score", () => {
     hasAnyContact: true,
   };
 
-  it("barbearia sem site, bem avaliada e com WhatsApp é quente", () => {
+  it("barbearia sem site nos dados, bem avaliada e com WhatsApp é quente (sem inventar falta de agendamento)", () => {
     const s = computeScore(base);
     expect(s.blockA).toBe(45);
     expect(s.blockB).toBe(15);
-    expect(s.blockC).toBe(20);
+    expect(s.blockC).toBe(8);
     expect(s.blockD).toBe(8);
-    expect(s.total).toBe(88);
+    expect(s.total).toBe(76);
     expect(s.band).toBe("quente");
     expect(s.rules.every((r) => r.label.length > 0)).toBe(true);
+    expect(s.rules.some((r) => r.label.includes("agendamento"))).toBe(false);
+    expect(s.rules.find((r) => r.block === "A")?.label).toMatch(/não encontrado nos dados/i);
+  });
+
+  it("só pontua falta de agendamento ou cardápio quando === false (nunca null/undefined)", () => {
+    expect(computeScore({ ...base, siteType: "site_proprio", hasBooking: null }).blockC).toBe(8);
+    expect(computeScore({ ...base, siteType: "site_proprio", hasBooking: false }).blockC).toBe(20);
+    expect(computeScore({ ...base, category: "restaurante", siteType: "site_proprio", hasMenu: null }).blockC).toBe(0);
+    expect(computeScore({ ...base, category: "restaurante", siteType: "site_proprio", hasMenu: false }).blockC).toBe(12);
+    expect(computeScore({ ...base, category: "restaurante", siteType: "site_proprio", hasMenu: true }).blockC).toBe(0);
   });
 
   it("site próprio com problemas respeita o teto de 35", () => {
@@ -201,7 +211,7 @@ describe("dados abertos (Overture)", () => {
     });
     expect(s.blockB).toBe(18);
     expect(s.rules.some((r) => r.label.includes("93%"))).toBe(true);
-    expect(s.total).toBe(45 + 18 + 20 + 6);
+    expect(s.total).toBe(45 + 18 + 8 + 6);
   });
 
   it("confiança baixa não pontua", () => {

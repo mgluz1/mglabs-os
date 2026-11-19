@@ -12,7 +12,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       <p className="mt-2 text-sm text-muted">Tente de novo. Se continuar, confira se o banco de dados está acessível em Status.</p>
       {error.digest && <p className="mt-2 text-xs text-muted">Código: {error.digest}</p>}
       <div className="mt-5 flex gap-2">
-        <button onClick={reset} className="btn btn-primary">Tentar novamente</button>
+        <button type="button" onClick={reset} className="btn btn-primary">Tentar novamente</button>
         <a href="/status" className="btn btn-ghost">Ver status</a>
       </div>
     </div>

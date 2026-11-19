@@ -46,16 +46,16 @@ export function computeScore(i: ScoreInput): ScoreResult {
 
   // A. Oportunidade digital
   const A = WEIGHTS.A;
-  if (i.siteType === "sem_site") add("A", "Sem site", A.semSite);
-  else if (i.siteType === "so_rede_social") add("A", "Só Instagram/WhatsApp/Linktree como site", A.soRedeSocial);
+  if (i.siteType === "sem_site") add("A", "Site não encontrado nos dados consultados", A.semSite);
+  else if (i.siteType === "so_rede_social") add("A", "Usa apenas rede social/WhatsApp como site", A.soRedeSocial);
   else {
     if (i.viewport === false) add("A", "Site não responsivo (sem viewport)", A.semViewport);
     if (i.psiPerformance != null && i.psiPerformance < 50) add("A", `Site lento no celular (PageSpeed ${i.psiPerformance})`, A.psiRuim);
     else if (i.psiPerformance != null && i.psiPerformance < 90) add("A", `Desempenho mediano (PageSpeed ${i.psiPerformance})`, A.psiMedio);
     if (i.https === false) add("A", "Sem HTTPS", A.semHttps);
-    if (i.hasServicesPage === false) add("A", "Sem página de serviços", A.semServicos);
-    if (i.seoBasicMissing) add("A", "SEO básico ausente", A.seoAusente);
-    if (i.hasWhatsappButton === false && i.hasTelLink === false) add("A", "Sem botão de WhatsApp ou telefone", A.semBotaoContato);
+    if (i.hasServicesPage === false) add("A", "Página de serviços não detectada no site", A.semServicos);
+    if (i.seoBasicMissing === true) add("A", "SEO básico ausente", A.seoAusente);
+    if (i.hasWhatsappButton === false && i.hasTelLink === false) add("A", "Botão de WhatsApp ou telefone não detectado", A.semBotaoContato);
   }
   let blockA = rules.filter((r) => r.block === "A").reduce((s, r) => s + r.points, 0);
   const capA = i.siteType === "site_proprio" ? A.siteCap : A.max;
@@ -81,11 +81,11 @@ export function computeScore(i: ScoreInput): ScoreResult {
   // reservado v1: CNPJ ativo > 2 anos (+5), porte ME/EPP (+5)
   const blockB = Math.min(sum(rules, "B"), B.max);
 
-  // C. Encaixe com a oferta
+  // C. Encaixe com a oferta — pontua somente === false quando houve auditoria válida (nunca trata null como ausência)
   const C = WEIGHTS.C;
   const cat = i.category ? getCategory(i.category) : undefined;
-  if (cat?.agenda && !i.hasBooking) add("C", "Vive de agenda e não tem agendamento online", C.agendaSemAgendamento);
-  if (cat?.id === "restaurante" && !i.hasMenu) add("C", "Sem cardápio digital/delivery próprio", C.restauranteSemCardapio);
+  if (cat?.agenda && i.hasBooking === false) add("C", "Negócio de agenda sem agendamento online detectado no site", C.agendaSemAgendamento);
+  if (cat?.id === "restaurante" && i.hasMenu === false) add("C", "Sem cardápio digital detectado no site", C.restauranteSemCardapio);
   if (cat && PRIORITY_CATEGORIES.includes(cat.id)) add("C", "Categoria prioritária da campanha", C.categoriaPrioritaria);
   const blockC = Math.min(sum(rules, "C"), C.max);
 

@@ -3,10 +3,10 @@ import "server-only";
 import { z } from "zod";
 
 import { MESSAGE_OBJECTIVES, MESSAGE_TONES, STAGE_DEFS, labelOf } from "@/lib/config/crm";
-import { generateJson } from "@/lib/ai/gemini";
+import { assertAiEnabled, generateJson } from "@/lib/ai/gemini";
 import { riskWarnings, sanitizeForAi } from "@/lib/ai/sanitize";
 import { COLD_OBJECTIVES, renderTemplate, withOptOut } from "@/lib/messages";
-import { assertWrite, ValidationError, type Ctx } from "@/lib/services/ctx";
+import { assertModule, assertWrite, ValidationError, type Ctx } from "@/lib/services/ctx";
 import { getDeal } from "@/lib/services/deals";
 import { messageContext, varsFor } from "@/lib/services/messages";
 
@@ -32,7 +32,9 @@ export async function generateMessageVariants(
   input: { dealId?: string | null; companyId?: string | null; contactId?: string | null; objective: string; service?: string | null; tone: string; observation?: string | null; useFacts?: string[]; count?: number; sender: string; optOut: boolean; consent: boolean },
 ): Promise<MessageVariant[]> {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   if (!input.consent) throw new ValidationError("Autorize o envio ao Gemini para gerar com IA.");
+  assertAiEnabled();
   const mc = await messageContext(ctx, input);
   if (mc.blocked) throw new ValidationError(mc.blockedReason ?? "Contato bloqueado.");
   const obj = labelOf(MESSAGE_OBJECTIVES, input.objective);
@@ -87,21 +89,27 @@ async function dealDigest(ctx: Ctx, dealId: string) {
 
 const summarySchema = z.object({ resumo: z.string().max(900), pontos_de_atencao: z.array(z.string().max(200)).max(5) });
 export async function summarizeDeal(ctx: Ctx, dealId: string, consent: boolean) {
+  assertModule(ctx, "comercial");
   if (!consent) throw new ValidationError("Autorize o envio ao Gemini para usar a IA.");
+  assertAiEnabled();
   const { text } = await dealDigest(ctx, dealId);
   return generateJson(ctx, "resumo", { system: DEAL_SYSTEM, user: `${text}\n\nFaça um resumo da situação em até 4 frases e liste até 3 pontos de atenção. JSON: {"resumo":"...","pontos_de_atencao":["..."]}`, schema: summarySchema, temperature: 0.3 });
 }
 
 const nextSchema = z.object({ acao: z.string().max(240), motivo: z.string().max(400), canal_sugerido: z.enum(["whatsapp", "ligacao", "email", "reuniao", "nenhum"]), prazo_dias: z.number().int().min(0).max(30) });
 export async function suggestNextAction(ctx: Ctx, dealId: string, consent: boolean) {
+  assertModule(ctx, "comercial");
   if (!consent) throw new ValidationError("Autorize o envio ao Gemini para usar a IA.");
+  assertAiEnabled();
   const { text } = await dealDigest(ctx, dealId);
   return generateJson(ctx, "proxima_acao", { system: DEAL_SYSTEM, user: `${text}\n\nSugira UMA próxima ação concreta. JSON: {"acao":"...","motivo":"...","canal_sugerido":"whatsapp|ligacao|email|reuniao|nenhum","prazo_dias":3}`, schema: nextSchema, temperature: 0.4 });
 }
 
 const tasksSchema = z.object({ tarefas: z.array(z.object({ titulo: z.string().max(140), prazo_dias: z.number().int().min(0).max(30), prioridade: z.enum(["baixa", "media", "alta"]) })).min(1).max(5) });
 export async function suggestTasks(ctx: Ctx, dealId: string, consent: boolean) {
+  assertModule(ctx, "comercial");
   if (!consent) throw new ValidationError("Autorize o envio ao Gemini para usar a IA.");
+  assertAiEnabled();
   const { text } = await dealDigest(ctx, dealId);
   return generateJson(ctx, "tarefas", { system: DEAL_SYSTEM, user: `${text}\n\nSugira de 1 a 4 tarefas curtas e verificáveis que ainda não existam na lista. JSON: {"tarefas":[{"titulo":"...","prazo_dias":2,"prioridade":"media"}]}`, schema: tasksSchema, temperature: 0.4 });
 }

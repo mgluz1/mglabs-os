@@ -7,7 +7,7 @@ import { Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStor
 
 import { Brand, BrandMark } from "@/components/brand";
 import { CommandPalette } from "@/components/shell/command-palette";
-import { NAV, QUICK_CREATE } from "@/components/shell/nav";
+import { COMMAND_LINKS, PRIMARY_NAV, QUICK_CREATE, SETTINGS_ITEM } from "@/components/shell/nav";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { ToastProvider } from "@/components/ui/overlays";
 
@@ -53,6 +53,11 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
   // atalhos: Ctrl/Cmd+K busca · Ctrl/Cmd+B menu · "g" + letra navega
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCreateOpen(false);
+        setMobileOpen(false);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -72,7 +77,10 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
       if (gPending.current) {
         clearTimeout(gPending.current);
         gPending.current = null;
-        const target = NAV.flatMap((g) => g.items).find((i) => i.shortcut === e.key.toLowerCase());
+        const key = e.key.toLowerCase();
+        const primary = [...PRIMARY_NAV, SETTINGS_ITEM].find((i) => i.shortcut === key || i.aliases?.includes(key));
+        const extra = COMMAND_LINKS.find((i) => i.shortcut === key);
+        const target = primary ?? extra;
         if (target) router.push(target.href);
         return;
       }
@@ -96,7 +104,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
             </Link>
           </div>
           <Suspense fallback={<NavList compact={collapsed} pathname="" />}><ActiveNav compact={collapsed} /></Suspense>
-          <button onClick={toggle} className="m-2 flex items-center justify-center gap-2 rounded-lg p-2 text-xs text-muted hover:bg-fg/6 hover:text-fg" aria-label={collapsed ? "Expandir menu" : "Recolher menu"} title="Ctrl+B">
+          <button type="button" onClick={toggle} className="m-2 flex items-center justify-center gap-2 rounded-lg p-2 text-xs text-muted hover:bg-fg/6 hover:text-fg" aria-label={collapsed ? "Expandir menu" : "Recolher menu"} title="Ctrl+B">
             {collapsed ? <ChevronsRight className="h-4 w-4" /> : <><ChevronsLeft className="h-4 w-4" /> Recolher</>}
           </button>
         </aside>
@@ -104,11 +112,11 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
         {/* mobile */}
         {mobileOpen && (
           <div className="fixed inset-0 z-50 md:hidden">
-            <button className="absolute inset-0 bg-black/55" onClick={() => setMobileOpen(false)} aria-label="Fechar menu" />
+            <button type="button" className="absolute inset-0 bg-black/55" onClick={() => setMobileOpen(false)} aria-label="Fechar menu" />
             <aside className="slide-in absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-surface shadow-2xl">
               <div className="flex h-14 items-center justify-between px-4">
                 <Brand />
-                <button onClick={() => setMobileOpen(false)} className="rounded p-1.5 text-muted hover:bg-fg/8" aria-label="Fechar menu">
+                <button type="button" onClick={() => setMobileOpen(false)} className="rounded p-1.5 text-muted hover:bg-fg/8" aria-label="Fechar menu">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -119,13 +127,14 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header data-app-chrome className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-background/85 px-3 backdrop-blur sm:px-4">
-            <button onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-muted hover:bg-fg/8 md:hidden" aria-label="Abrir menu">
+            <button type="button" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-muted hover:bg-fg/8 md:hidden" aria-label="Abrir menu">
               <Menu className="h-5 w-5" />
             </button>
             <span className="md:hidden">
               <BrandMark size={26} />
             </span>
             <button
+              type="button"
               onClick={() => setPaletteOpen(true)}
               className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-left text-sm text-muted transition hover:border-fg/25 sm:max-w-md"
               aria-label="Abrir busca global"
@@ -135,8 +144,13 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
               <kbd className="ml-auto hidden rounded border border-line px-1.5 py-0.5 text-[10px] sm:block">Ctrl K</kbd>
             </button>
             <div className="ml-auto flex items-center gap-1">
-              <div className="relative">
-                <button onClick={() => setCreateOpen((o) => !o)} onBlur={() => setTimeout(() => setCreateOpen(false), 150)} className="btn btn-primary btn-sm" aria-haspopup="menu" aria-expanded={createOpen}>
+              <div
+                className="relative"
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setCreateOpen(false);
+                }}
+              >
+                <button type="button" onClick={() => setCreateOpen((o) => !o)} className="btn btn-primary btn-sm" aria-haspopup="menu" aria-expanded={createOpen}>
                   <Plus className="h-4 w-4" aria-hidden />
                   <span className="hidden sm:inline">Novo</span>
                 </button>
@@ -144,7 +158,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: ReactN
                   <ul role="menu" className="fade-in absolute right-0 top-full z-40 mt-1.5 w-52 rounded-lg border border-line bg-elevated p-1 shadow-xl">
                     {QUICK_CREATE.map((c) => (
                       <li key={c.href} role="none">
-                        <Link role="menuitem" href={c.href} className="block rounded-md px-3 py-1.5 text-sm hover:bg-fg/8">
+                        <Link role="menuitem" href={c.href} onClick={() => setCreateOpen(false)} className="block rounded-md px-3 py-1.5 text-sm hover:bg-fg/8">
                           {c.label}
                         </Link>
                       </li>
@@ -172,34 +186,41 @@ function ActiveNav({ compact, onNavigate }: { compact: boolean; onNavigate?: () 
   return <NavList compact={compact} pathname={pathname} onNavigate={onNavigate} />;
 }
 
-function NavList({ compact, pathname, onNavigate }: { compact: boolean; pathname: string; onNavigate?: () => void }) {
+const SETTINGS_PATHS = ["/configuracoes", "/financeiro", "/status"];
+
+function NavLink({ item, active, compact, onNavigate }: { item: typeof SETTINGS_ITEM; active: boolean; compact: boolean; onNavigate?: () => void }) {
   return (
-    <nav aria-label="Navegação principal" className="flex-1 space-y-5 overflow-y-auto px-2 pb-3 pt-3">
-      {NAV.map((g) => (
-        <div key={g.label}>
-          {!compact ? <div className="eyebrow px-2.5 pb-1.5">{g.label}</div> : <div className="mx-3 mb-1 border-t border-line first:hidden" />}
-          <ul className="space-y-0.5">
-            {g.items.map((i) => {
-              const active = pathname === i.href || pathname.startsWith(i.href + "/");
-              return (
-                <li key={i.href}>
-                  <Link
-                    href={i.href}
-                    onClick={onNavigate}
-                    title={compact ? i.label : undefined}
-                    aria-current={active ? "page" : undefined}
-                    className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-colors ${compact ? "justify-center" : ""} ${active ? "bg-surface font-medium text-fg shadow-[0_0_0_1px_var(--line)]" : "text-fg/70 hover:bg-fg/5 hover:text-fg"}`}
-                  >
-                    {active && <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r bg-brand" aria-hidden />}
-                    <i.icon className={`h-[17px] w-[17px] shrink-0 ${active ? "text-brand" : "text-muted group-hover:text-fg"}`} aria-hidden />
-                    {!compact && <span className="truncate">{i.label}</span>}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      title={compact ? item.label : undefined}
+      aria-current={active ? "page" : undefined}
+      className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-colors ${compact ? "justify-center" : ""} ${active ? "bg-surface font-medium text-fg shadow-[0_0_0_1px_var(--line)]" : "text-fg/70 hover:bg-fg/5 hover:text-fg"}`}
+    >
+      {active && <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r bg-brand" aria-hidden />}
+      <item.icon className={`h-[17px] w-[17px] shrink-0 ${active ? "text-brand" : "text-muted group-hover:text-fg"}`} aria-hidden />
+      {!compact && <span className="truncate">{item.label}</span>}
+    </Link>
+  );
+}
+
+function NavList({ compact, pathname, onNavigate }: { compact: boolean; pathname: string; onNavigate?: () => void }) {
+  const isSettingsActive = SETTINGS_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  return (
+    <nav aria-label="Navegação principal" className="flex flex-1 flex-col overflow-y-auto px-2 pb-2 pt-3">
+      <ul className="space-y-0.5">
+        {PRIMARY_NAV.map((i) => {
+          const active = pathname === i.href || pathname.startsWith(i.href + "/") || (i.href === "/crm" && pathname.startsWith("/empresas/")) || (i.href === "/crm" && pathname.startsWith("/propostas/"));
+          return (
+            <li key={i.href}>
+              <NavLink item={i} active={active} compact={compact} onNavigate={onNavigate} />
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-auto border-t border-line pt-2">
+        <NavLink item={SETTINGS_ITEM} active={isSettingsActive} compact={compact} onNavigate={onNavigate} />
+      </div>
     </nav>
   );
 }

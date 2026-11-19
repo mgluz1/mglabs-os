@@ -3,13 +3,15 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { Radar } from "lucide-react";
-import { setWorkerUrl, type StyleSpecification } from "maplibre-gl";
-import { useEffect, useMemo } from "react";
-import Map, { AttributionControl, Layer, Marker, NavigationControl, Source, useMap } from "react-map-gl/maplibre";
+import { setWorkerUrl, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
+import { useMemo, useRef } from "react";
+import { useEffect } from "react";
+import Map, { AttributionControl, Layer, Marker, NavigationControl, Source, useMap, type MapLayerMouseEvent, type MapRef } from "react-map-gl/maplibre";
 
 import { bandOf } from "@/components/lead/badges";
 import { CATEGORY_ICON } from "@/components/radar/ui";
 import { offset, type LatLng } from "@/lib/geo";
+import { buildPlacesGeoJson, PLACE_RING_COLOR } from "@/lib/radar-geojson";
 import type { RadarPlace } from "@/lib/types";
 import { useTheme } from "@/lib/use-theme";
 
@@ -60,8 +62,6 @@ function osmStyle(dark: boolean): StyleSpecification {
   };
 }
 
-const RING = { quente: "#0b5a3e", morno: "#d9a441", frio: "#94a3b8", analisando: "#94a3b8" } as const;
-
 function circlePolygon(c: LatLng, radiusM: number, steps = 128): GeoJSON.Feature<GeoJSON.Polygon> {
   const coords: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
@@ -73,6 +73,7 @@ function circlePolygon(c: LatLng, radiusM: number, steps = 128): GeoJSON.Feature
 }
 
 export function RadarMap({ center, panTarget, radiusM, places, selectedId, category, leftInset = 0, compact = false, onPickCenter, onSelect }: Props) {
+  const mapRef = useRef<MapRef | null>(null);
   const theme = useTheme();
   const dark = theme === "dark";
   const style = useMemo(() => VECTOR_STYLE ?? osmStyle(dark), [dark]);
@@ -80,12 +81,40 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, categ
   const CenterIcon = (category && CATEGORY_ICON[category]) || Radar;
   const line = dark ? "#38d385" : "#0b5a3e";
 
+  const placesGeoJson = useMemo(() => buildPlacesGeoJson(places), [places]);
+
+  const selectedPlace = useMemo(() => (selectedId ? places.find((p) => p.id === selectedId) ?? null : null), [places, selectedId]);
+
+  const handleMapClick = (e: MapLayerMouseEvent) => {
+    const feat = e.features?.[0];
+    if (!feat) {
+      onPickCenter({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      return;
+    }
+    if (feat.layer.id === "places-cluster") {
+      const clusterId = feat.properties?.cluster_id;
+      const map = mapRef.current?.getMap();
+      const source = map?.getSource("places") as GeoJSONSource | undefined;
+      if (map && source && typeof clusterId === "number" && feat.geometry.type === "Point") {
+        const [lng, lat] = feat.geometry.coordinates;
+        void source.getClusterExpansionZoom(clusterId).then((zoom) => {
+          map.easeTo({ center: [lng, lat], zoom, duration: 400 });
+        });
+      }
+      return;
+    }
+    const id = feat.properties?.id;
+    if (typeof id === "string") onSelect(id);
+  };
+
   return (
     <Map
+      ref={mapRef}
       initialViewState={{ latitude: center.lat, longitude: center.lng, zoom: 12.5 }}
       mapStyle={style}
       attributionControl={false}
-      onClick={(e) => onPickCenter({ lat: e.lngLat.lat, lng: e.lngLat.lng })}
+      interactiveLayerIds={places.length > 0 ? ["places-cluster", "places-point"] : undefined}
+      onClick={handleMapClick}
       style={{ width: "100%", height: "100%" }}
       cursor="crosshair"
     >
@@ -98,47 +127,69 @@ export function RadarMap({ center, panTarget, radiusM, places, selectedId, categ
         <Layer id="raio-line" type="line" paint={{ "line-color": line, "line-width": 2.5, "line-opacity": 0.95 }} />
       </Source>
 
+      <Source id="places" type="geojson" data={placesGeoJson} cluster clusterMaxZoom={14} clusterRadius={44}>
+        <Layer
+          id="places-cluster"
+          type="circle"
+          filter={["has", "point_count"]}
+          paint={{
+            "circle-color": line,
+            "circle-radius": ["step", ["get", "point_count"], 15, 25, 20, 100, 24],
+            "circle-stroke-width": 3,
+            "circle-stroke-color": "#ffffff",
+            "circle-opacity": 0.92,
+          }}
+        />
+        <Layer
+          id="places-point"
+          type="circle"
+          filter={["!", ["has", "point_count"]]}
+          paint={{
+            "circle-color": "#ffffff",
+            "circle-radius": 9,
+            "circle-stroke-width": 3.5,
+            "circle-stroke-color": ["get", "ringColor"],
+          }}
+        />
+      </Source>
+
       <Marker latitude={center.lat} longitude={center.lng} anchor="center" style={{ zIndex: 5 }}>
         <span className="pointer-events-none flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#0b5a3e] shadow-[0_6px_20px_rgba(15,31,23,.28)] ring-4 ring-white/60">
           <CenterIcon className="h-5 w-5" aria-hidden />
         </span>
       </Marker>
 
-      {places.map((p) => {
-        const band = bandOf(p.score);
-        const sel = p.id === selectedId;
-        return (
-          <Marker
-            key={p.id}
-            latitude={p.lat}
-            longitude={p.lng}
-            anchor="center"
-            style={{ zIndex: sel ? 6 : band === "quente" ? 3 : 2 }}
-            onClick={(e) => {
-              e.originalEvent.stopPropagation();
-              onSelect(p.id);
-            }}
-          >
-            <span className="relative flex items-center">
-              <button
-                type="button"
-                title={`${p.name}${p.score != null ? ` · nota ${p.score}` : " · analisando"}`}
-                aria-label={`${p.name}${p.score != null ? `, nota ${p.score}` : ""}`}
-                className={`flex items-center justify-center rounded-full font-semibold tabular-nums shadow-[0_2px_8px_rgba(15,31,23,.25)] transition-transform hover:scale-110 ${sel ? "h-10 w-10 scale-110 text-[13px] text-white" : "h-[34px] w-[34px] bg-white text-[12px] text-[#0f1f17]"}`}
-                style={{
-                  background: sel ? RING[band] : "#fff",
-                  border: `3px ${band === "analisando" ? "dashed" : "solid"} ${sel ? "#fff" : RING[band]}`,
-                }}
-              >
-                {p.score ?? "…"}
-              </button>
-              {sel && (
-                <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-full bg-[#14231b]/90 px-3 py-1 text-xs font-medium text-white shadow-lg">{p.name}</span>
-              )}
+      {selectedPlace && (
+        <Marker
+          key={selectedPlace.id}
+          latitude={selectedPlace.lat}
+          longitude={selectedPlace.lng}
+          anchor="center"
+          style={{ zIndex: 6 }}
+          onClick={(e) => {
+            e.originalEvent.stopPropagation();
+            onSelect(selectedPlace.id);
+          }}
+        >
+          <span className="relative flex items-center">
+            <button
+              type="button"
+              title={`${selectedPlace.name}${selectedPlace.score != null ? ` · nota ${selectedPlace.score}` : " · analisando"}`}
+              aria-label={`${selectedPlace.name}${selectedPlace.score != null ? `, nota ${selectedPlace.score}` : ""}`}
+              className="flex h-10 w-10 scale-110 items-center justify-center rounded-full text-[13px] font-semibold text-white tabular-nums shadow-[0_2px_8px_rgba(15,31,23,.25)]"
+              style={{
+                background: PLACE_RING_COLOR[bandOf(selectedPlace.score)],
+                border: `3px ${bandOf(selectedPlace.score) === "analisando" ? "dashed" : "solid"} #fff`,
+              }}
+            >
+              {selectedPlace.score ?? "…"}
+            </button>
+            <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-full bg-[#14231b]/90 px-3 py-1 text-xs font-medium text-white shadow-lg">
+              {selectedPlace.name}
             </span>
-          </Marker>
-        );
-      })}
+          </span>
+        </Marker>
+      )}
     </Map>
   );
 }

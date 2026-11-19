@@ -60,43 +60,89 @@ export const DEFAULT_SERVICE = "sites e soluções digitais";
 export const TEMPLATE_VARIABLES = ["empresa", "contato", "remetente", "servico", "cidade", "observacao", "origem"] as const;
 
 /** Modelos iniciais (editáveis em Mensagens). Curtos, humanos, sem promessas nem números inventados. */
-export const DEFAULT_TEMPLATES: { name: string; objective: ObjectiveId; body: string }[] = [
+export const DEFAULT_TEMPLATES: { name: string; objective: ObjectiveId; service?: string | null; body: string }[] = [
   {
     name: "Primeiro contato — direto",
     objective: "primeiro_contato",
+    service: null,
     body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS, em Goiânia.\n{{origem}}.\n{{observacao}}\nTrabalho com {{servico}} para negócios locais.\nFaz sentido eu te mostrar como isso funcionaria na {{empresa}}?",
+  },
+  {
+    name: "Primeiro contato — Site institucional",
+    objective: "primeiro_contato",
+    service: "Site institucional",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS, em Goiânia.\n{{origem}}.\n{{observacao}}\nAjudo negócios locais a ter um site claro, rápido no celular e fácil para o cliente pedir atendimento.\nPosso te enviar uma ideia rápida aplicada à {{empresa}}?",
+  },
+  {
+    name: "Primeiro contato — Site + agendamento",
+    objective: "primeiro_contato",
+    service: "Site + agendamento",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS, em Goiânia.\n{{origem}}.\n{{observacao}}\nTrabalho com página profissional e agendamento online para reduzir idas e vindas no WhatsApp.\nFaz sentido eu te mostrar um exemplo rápido para a {{empresa}}?",
+  },
+  {
+    name: "Primeiro contato — Landing page",
+    objective: "primeiro_contato",
+    service: "Landing page",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS, em Goiânia.\n{{origem}}.\n{{observacao}}\nCrio páginas diretas para apresentar seus serviços e transformar visitas do Instagram ou Google em conversas no WhatsApp.\nPosso te mostrar como ficaria para a {{empresa}}?",
+  },
+  {
+    name: "Primeiro contato — Automação de WhatsApp",
+    objective: "primeiro_contato",
+    service: "Automação de WhatsApp",
+    body: "Olá{{contato}}! Aqui é {{remetente}}, da MGLABS, em Goiânia.\n{{origem}}.\n{{observacao}}\nAjudo empresas locais a organizar o atendimento inicial no WhatsApp com respostas rápidas e lembretes para não perder contatos.\nFaz sentido conversar 5 minutos sobre a rotina da {{empresa}}?",
   },
   {
     name: "Follow-up leve",
     objective: "follow_up",
+    service: null,
     body: "Oi{{contato}}, {{remetente}} da MGLABS aqui. Passando para saber se você chegou a ver minha mensagem sobre {{servico}} para a {{empresa}}. Posso te explicar em 5 minutos?",
   },
   {
     name: "Resposta a interessado",
     objective: "resposta_interesse",
+    service: null,
     body: "Que bom saber do seu interesse{{contato}}! Para eu te passar algo que faça sentido para a {{empresa}}, posso te fazer duas ou três perguntas rápidas? Se preferir, marcamos uma conversa de 15 minutos.",
   },
   {
     name: "Envio de proposta",
     objective: "apresentacao_proposta",
+    service: null,
     body: "Oi{{contato}}! Segue a proposta de {{servico}} para a {{empresa}}, com escopo, prazo e investimento. Qualquer ponto que queira ajustar, me avise e eu adapto. Posso te explicar por chamada?",
   },
   {
     name: "Negociação",
     objective: "negociacao",
+    service: null,
     body: "Obrigado pelo retorno{{contato}}! Entendi seus pontos sobre a proposta. Consigo ajustar escopo ou forma de pagamento para caber melhor na {{empresa}}. Qual parte pesa mais para você hoje?",
   },
   {
     name: "Reativação",
     objective: "reativacao",
+    service: null,
     body: "Oi{{contato}}, {{remetente}} da MGLABS. Conversamos há um tempo sobre {{servico}} para a {{empresa}}. Se ainda fizer sentido, posso retomar de onde paramos.",
   },
   {
     name: "Pós-venda",
     objective: "pos_venda",
+    service: null,
     body: "Oi{{contato}}! Passando para saber como está sendo o uso do que entregamos para a {{empresa}}. Algum ajuste ou dúvida? Estou à disposição.",
   },
 ];
+
+/** Escolhe o modelo mais adequado ao objetivo e à oferta/serviço selecionado. */
+export function pickTemplateForOffer<T extends { objective: string; service: string | null }>(
+  templates: T[],
+  objective: string,
+  service?: string | null,
+): T | null {
+  const byObjective = templates.filter((t) => t.objective === objective);
+  if (!byObjective.length) return null;
+  if (service) {
+    const exact = byObjective.find((t) => t.service === service);
+    if (exact) return exact;
+  }
+  return byObjective.find((t) => !t.service) ?? byObjective[0];
+}
 
 /** "{{contato}}" entra como ", Nome" para a saudação não ficar quebrada. */
 export function greetingVars(contactName: string | null | undefined): string | null {

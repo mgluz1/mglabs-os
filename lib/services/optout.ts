@@ -6,7 +6,7 @@ import { crmCompanies, crmContacts, crmDeals, crmStages, optouts, places } from 
 import { db } from "@/lib/db";
 import { parseBrPhone } from "@/lib/phone";
 import { logActivity } from "@/lib/services/activities";
-import { assertWrite, audit, type Ctx } from "@/lib/services/ctx";
+import { assertAnyModule, assertModule, assertWrite, audit, type Ctx } from "@/lib/services/ctx";
 
 /** Todos os números de uma empresa/contato, em E.164, para consultar a lista de opt-out. */
 function e164s(list: (string | null | undefined)[]): string[] {
@@ -20,6 +20,7 @@ export type BlockInfo = { blocked: boolean; reason: string | null };
  * Consulta a lista antiga (optouts) e a marca no contato do CRM.
  */
 export async function contactBlock(ctx: Ctx, input: { companyId?: string | null; contactId?: string | null; phones?: (string | null | undefined)[] }): Promise<BlockInfo> {
+  assertAnyModule(ctx, "comercial", "operacao");
   let placeId: string | null = null;
   const phones = [...(input.phones ?? [])];
   if (input.companyId) {
@@ -55,6 +56,7 @@ export async function contactBlock(ctx: Ctx, input: { companyId?: string | null;
 /** Registra o pedido de não contato (empresa inteira ou um contato) e encerra as negociações abertas. */
 export async function registerOptOut(ctx: Ctx, input: { companyId: string; contactId?: string | null; reason?: string | null }) {
   assertWrite(ctx);
+  assertModule(ctx, "comercial");
   const [company] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.id, input.companyId), eq(crmCompanies.workspaceId, ctx.workspaceId)));
   if (!company) throw new Error("Empresa não encontrada.");
   const reason = input.reason?.trim() || "Pediu para não ser contatado";
